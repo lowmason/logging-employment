@@ -318,8 +318,9 @@ Plan 15 Task 10 replaced this span of the Stage 5 block, which treated `D-111` a
 `5667d93` makes `share_exponentially_weighted` discount each share by its age in calendar months,
 counted back from the newest observation, instead of by its position in a list of disclosed months.
 `runs/4cf47a918dd8` was re-run at that commit with a clean tree -- `run-baselines`, `reconcile`, then
-`validate` (12 min 42 s) -- after the directory was copied to `runs/_pre_d113_4cf47a918dd8`. The run
-id did not move, since the change adds no config key. Every manifest the re-run wrote records
+`validate` (12 min 42 s, with the slow tests sharing the CPU) -- after the directory was copied to
+`runs/_pre_d113_4cf47a918dd8`. The run id did not move, since the change adds no config key. Every
+manifest the re-run wrote records
 `code_commit` `5667d93`, so this also brings the comparand up to date with `e937605`'s exactly
 rounded metric sums, which the 2026-09-13 run predated. Compared by join on each table's key, never
 by position:
@@ -334,8 +335,9 @@ by position:
 **The attribution is clean.** No other estimator's estimate moved: every non-exponential row of
 `baseline_results` and `validation_scores` is identical. The other eight's metric and scoreboard
 movement is the last-ulp signature of `e937605`, which changed how the metrics sum, not what they
-sum. `raw_weight` moves on exactly 120 rows, the 120 gappy histories. `estimate` moves on 486
-because §12.2 renormalizes every cell of a month in which one own weight moved, and plan 15's §12.3
+sum. `raw_weight` moves on exactly 120 rows, and matched by month and state they are the 120 gappy
+histories. `estimate` moves on 486 because §12.2 renormalizes every cell of a month in which one own
+weight moved, and plan 15's §12.3
 scaling then clips the largest moves: 3.92% at most here, against 7.60% under allocation alone. The
 exponential variant's `weight_basis_counts` (327 own, 900 fallback) and its declines (none) are
 unchanged, as they must be, since a positively weighted mean of the same shares is positive exactly
