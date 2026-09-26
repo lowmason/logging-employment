@@ -54,7 +54,7 @@ a green check says nothing about the D1 integration tests — those still need a
 have run. Nothing else is deselected. Those counts are THIS MAC's: ubuntu-latest reports 1407
 passed, 46 skipped, 27 deselected (run 34765933053), because
 `tests/audit/test_qcew_codes.py::test_period_basis_quotes_the_reference_verbatim_where_the_reference_is_readable`
-skips where the personal `~/.Codex/skills/bls-data-context/` reference is absent (D-055).
+skips where the personal `~/.claude/skills/bls-data-context/` reference is absent (D-055).
 
 **Float goldens compare through `tests/golden_compare.py`, not `.equals`** (2026-09-13). The two
 float goldens (`test_validation_golden.py::test_the_metrics_match_the_golden`,
@@ -88,12 +88,12 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
 | `runs.py` | `runs/<run_id>/` and how the id is derived |
 | `errors.py` | the fail-closed exception hierarchy (§18.3) |
 | `classification.py`, `constants.py` | §3.1's memo read out of the spec file rather than retyped; the D1 window, `113310`, ownership `5`, states+DC FIPS, measured QCEW code sets |
-| `ingest/` | one module per source + the shared `HttpFetcher` → see `ingest/AGENTS.md` |
+| `ingest/` | one module per source + the shared `HttpFetcher` → see `ingest/CLAUDE.md` |
 | `harmonize/` | NAICS vintages, the nine versioned dimensions, §8.6 bridges, CBP regime-by-year, universe guards |
-| `constraints/` | §9 identification engine → see `constraints/AGENTS.md` |
-| `reconcile/` | §12 exact reconciliation → see `reconcile/AGENTS.md` |
-| `baselines/` | §10 transparent baselines → see `baselines/AGENTS.md` |
-| `validate/` | §13 pseudo-suppression harness → see `validate/AGENTS.md` |
+| `constraints/` | §9 identification engine → see `constraints/CLAUDE.md` |
+| `reconcile/` | §12 exact reconciliation → see `reconcile/CLAUDE.md` |
+| `baselines/` | §10 transparent baselines → see `baselines/CLAUDE.md` |
+| `validate/` | §13 pseudo-suppression harness → see `validate/CLAUDE.md` |
 | `registry/` | §7.1 source registry: row model, `registry/sources.yaml`, `registry verify`'s checks |
 | `disclosure/` | §9.8 flags only — `exact_reconstruction_flag`, `narrow_feasible_interval_flag`, on suppressed cells only, thresholds from config |
 
@@ -135,7 +135,7 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
   points: `build.snapshot_paths` (the gotcha below), `constraints/cells.py::_assert_one_vintage_per_cell`,
   `constraints/compat.py` (`:141`, `:154`, and `assert_parent_margin_compatible` since plan 15) and
   `constraints/rows.py::constraint`.
-  None of them is a general guarantee — `constraints/AGENTS.md` says exactly what each covers.
+  None of them is a general guarantee — `constraints/CLAUDE.md` says exactly what each covers.
 - **Docstrings are the design record.** Nearly every callable has one, and the house style is to
   say *why this and not the obvious alternative*, citing §/`INV-`/`REQ-`/`SRC-` ids; move those
   notes when refactoring rather than dropping them. Corollary: a note that reads as a measurement
@@ -179,7 +179,7 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
   omitting the key when unset (`runs.py` docstring), so existing runs keep their id.
 - **A run directory can be stale w.r.t. your code.** `run_id` ignores source, so editing an
   estimator and re-running overwrites the same `runs/<id>/`. The one cross-stage check that does
-  fire is `constraint_set_hash` (see `constraints/AGENTS.md`).
+  fire is `constraint_set_hash` (see `constraints/CLAUDE.md`).
 - **CBP responses are not byte-reproducible** — set-identical rows in a different order, so each
   re-fetch stores another object for the same year. `build.snapshot_paths` raises
   `AmbiguousSnapshotError` (`build.py::snapshot_paths`) rather than stacking two snapshots of one key; pass the
