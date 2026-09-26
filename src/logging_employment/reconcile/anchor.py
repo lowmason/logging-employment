@@ -1,8 +1,9 @@
 """The substitute allocation anchor, and the gate that admits it.
 
-WHY THIS MODULE EXISTS. §12.2 defines the residual `R_t = N_t - sum_{s in D_t} E^obs` "for a
-compatible national total N_t" and never defines *compatible*. §5.5 does, listing ten dimensions
-that MUST be evaluated before a source value is used. Nine match by construction here, because
+WHY THIS MODULE EXISTS. §12.2 defines the residual `R_t = N_t - sum_{s in D_t} E^obs` for a
+compatible national total N_t. Until `D-120` (2026-09-26) it never said what *compatible* meant;
+it now states the contract this module implements. §5.5 lists the ten dimensions that MUST be
+evaluated before a source value is used. Nine match by construction here, because
 N_t and the state rows are the same field of the same QCEW file: reference period; industry code
 and NAICS vintage (one §5.5 bullet, not two); ownership coverage; employment concept; statistical
 unit; size concept; release vintage and revision status; disclosure and noise regime -- both rows
