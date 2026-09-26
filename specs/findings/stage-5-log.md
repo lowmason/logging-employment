@@ -352,3 +352,27 @@ WAPE moved in both directions across regimes, by at most 3.96% (`regional_blocks
 0.00580 -> 0.00557). The largest relative move anywhere is a division stratum, `naics_transition`
 seed 1024 `mountain`, 0.0160 -> 0.0737, where a few cells dominate the ratio. Two coverage values
 moved.
+
+## 2026-09-26 — resume reconcile: the comparand is current, and two superseded Stage 5 readings
+
+`derive-roadmap` §5 re-validated Stage 5 against what shipped after the roadmap's last edit
+(`a0dcdb6`). Measured at `ecfa1d6`: `run_id(cfg, _input_digests(cfg))` for `config.yaml` resolves to
+`4cf47a918dd8`. Its manifests record `code_commit` `5667d93` for `baseline_manifest.json`,
+`reconcile_manifest.json` and `validation_manifest.json`, and `bc0498aa` for `bounds_manifest.json`
+and `schema_manifest.json`. The older two are current, not stale: between `bc0498aa` and `ecfa1d6`
+the only changes under `constraints/`, `disclosure/`, `harmonize/`, `build.py` and `contracts.py` are
+two docstring paths re-pointed to `specs/completed/` and `constraints/CLAUDE.md`.
+
+The spec's Stage 4 stamp still named `runs/f03023ac9f3a` as Stage 5's comparand and "CURRENT", in the
+Rollout note writing-plans reads. It now carries an italic *Superseded…* qualification rather than a
+rewrite, the way plan 15 qualified the Stage 2 stamp; its `COMPLETE` line is untouched.
+
+**Superseded readings** (stage-block rule 1), replaced in the roadmap's Stage 5 block.
+
+`Consumes`, the comparand sentence, which did not say when the directory's contents were written:
+
+> Both the runner and the harness scale estimates into finite bounds by §12.3 (`D-087`), and the §13.10 comparand is `runs/4cf47a918dd8`, not Stage 4's acceptance run `runs/f03023ac9f3a`.
+
+`Exit`, which contradicted `Consumes` by pointing a planner back at Stage 4's acceptance run:
+
+> the promotion record states beat or not-beaten against Stage 4's numbers and the simpler method is selected when not beaten (§13.10 final line).

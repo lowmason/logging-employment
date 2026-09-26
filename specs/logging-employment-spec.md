@@ -2534,6 +2534,10 @@ Other §21 rows keep their Appendix A defaults until a stage's plan or finding c
 >   `contracts.VALIDATION_SCOREBOARD_SCHEMA` and by §7.15, and `wape` is the one column that may
 >   be null — an estimator that declined every cell has no error, not zero error, so a gate that
 >   sorts nulls first would crown it.
+>   *Superseded as Stage 5's comparand by plan 15 (`D-111`, 2026-09-13): `config.yaml` now resolves
+>   to `runs/4cf47a918dd8`, whose baseline, reconcile and validation artifacts were re-written at
+>   `5667d93` (`D-113`, 2026-09-26). `runs/f03023ac9f3a` stays on disk as Stage 4's acceptance run;
+>   the roadmap's Stage 5 `Consumes` names the comparand (`specs/findings/stage-5-log.md`).*
 > - **Nine regimes score, not thirteen, and the four that do not each say why in their own
 >   words.** `rolling_origin` and `cbp_size_gaps` are `feasible / scored=0` because neither
 >   produces a `MaskTarget` — one truncates the frame, the other drops CBP state-years;
@@ -2543,3 +2547,5 @@ Other §21 rows keep their Appendix A defaults until a stage's plan or finding c
 >   declared-but-unscored by decision, REQ-022 is not closed by Stage 4, and Stage 5's §13.10 gate
 >   is applied over nine of the thirteen regimes. Stage 5 should not infer a design for the other
 >   four.
+
+- Roadmap: specs/logging-employment-spec-roadmap.md, Stage 5 — on plan completion, tick the stage and re-validate later stages against what shipped.
