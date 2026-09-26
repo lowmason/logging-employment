@@ -14,20 +14,20 @@ from logging_employment.config import Config, load_config, resolved_dict
 from logging_employment.runs import run_id
 
 # NOT Appendix A's fence. Measured against `specs/logging-employment-spec.md`'s `## Appendix A`
-# block, this constant differs from it in five ways, every one of which is this package's doing
+# block, this constant differs from it in four ways, every one of which is this package's doing
 # rather than the spec's:
 #   1. it OMITS `model:` -- Stage 5's block, for which `Config` has no field. Adding one would put
 #      a key in `resolved_dict` and re-identify every run directory under `runs/`.
 #   2. it OMITS `promotion:` and `validation:`, which `Config` defaults.
-#   3. it ADDS `baselines:` and the two `disclosure:` narrow-interval widths, which `Config`
-#      REQUIRES and the spec states nowhere.
-#   4. it ADDS five `reconciliation:` keys this package originated (`tolerance`,
+#   3. it ADDS five `reconciliation:` keys this package originated (`tolerance`,
 #      `max_bisection_iterations`, `max_projection_iterations`, `zero_seed_floor`,
 #      `integerization_tiebreak`).
-#   5. it OMITS Appendix A's seven `enabled: false` sources.
-# The name says so because the old one (`APPENDIX_A`) claimed to be the spec's example
-# configuration and was not, which is how "Appendix A loads" stayed believable while the real
-# fence produced eleven validation errors. `appendix_a_fence()` below reads the actual block.
+#   4. it OMITS Appendix A's seven `enabled: false` sources.
+# A fifth, that it ADDED `baselines:` and the two `disclosure:` narrow-interval widths, closed when
+# `D-121` put all three into Appendix A with the values below. The name says so because the old
+# one (`APPENDIX_A`) claimed to be the spec's example configuration and was not, which is how
+# "Appendix A loads" stayed believable while the real fence produced eleven validation errors.
+# `appendix_a_fence()` below reads the actual block.
 APPENDIX_A_AS_THE_CODE_REQUIRES = """
 project:
   name: 'logging-state-employment'
@@ -97,8 +97,8 @@ def _write(tmp_path: Path, text: str) -> Path:
 def test_the_code_shaped_config_parses(tmp_path: Path) -> None:
     """The CODE-shaped config loads -- renamed because it never tested Appendix A's own fence.
 
-    See the constant's header for the five ways it differs. What Appendix A itself does is
-    `test_the_spec_fence_is_short_only_the_keys_the_spec_never_states`.
+    See the constant's header for the four ways it differs. What Appendix A itself does is
+    `test_the_spec_fence_loads_but_for_stage_5s_model_block`.
     """
     cfg = load_config(_write(tmp_path, APPENDIX_A_AS_THE_CODE_REQUIRES))
     assert cfg.project.geography_universe == "states_dc"
@@ -244,23 +244,15 @@ def appendix_a_fence() -> dict[str, Any]:
 
 
 def _appendix_a_made_loadable() -> dict[str, Any]:
-    """Appendix A's fence minus `model:`, plus the three keys the spec never states.
+    """Appendix A's fence minus `model:`, the one block `Config` has no field for.
 
-    Patched HERE and not in `config.py`, which is the whole point of the previous test: a default
-    for `narrow_interval_absolute_width` would turn a governance threshold §21 explicitly defers
-    to its owner into a silent constant, and a `model:` field would re-identify every run
-    directory for a stage that does not exist yet. `baselines: {}` is enough because every
-    `BaselinesConfig` field carries a default -- the block is required only because `Config`
-    declares no default for it.
+    Popped HERE and not accepted in `config.py`, because a `model:` field would re-identify every
+    run directory for a stage that does not exist yet. Until `D-121` this also patched in
+    `baselines:` and the two `disclosure:` widths, which the spec did not state; Appendix A now
+    carries all three, the widths labelled as the governance owner's policy (§21).
     """
     fence = appendix_a_fence()
     fence.pop("model")
-    fence["baselines"] = {}
-    fence["disclosure"] = {
-        **fence["disclosure"],
-        "narrow_interval_absolute_width": 10,
-        "narrow_interval_relative_width": 0.25,
-    }
     return fence
 
 
@@ -271,32 +263,24 @@ def _error_locations(payload: dict[str, Any]) -> list[tuple[str, str]]:
     return sorted((".".join(str(p) for p in e["loc"]), e["type"]) for e in caught.value.errors())
 
 
-def test_the_spec_fence_is_short_only_the_keys_the_spec_never_states() -> None:
-    """Appendix A's own fence must load but for keys no code can supply.
+def test_the_spec_fence_loads_but_for_stage_5s_model_block() -> None:
+    """Appendix A's own fence loads, except for the one block `Config` has no field for.
 
     Before Appendix A's seven `enabled: false` sources were declared on `SourcesConfig`, this
-    fence produced ELEVEN errors: those seven, `model`, and the three below. The seven were the
-    only ones code could fix. What is left is a spec gap in both directions and is asserted here
-    rather than papered over:
-
-    * `model:` is Stage 5's block and this package has no field for it. Adding one would put a
-      key in `resolved_dict` and re-identify every run directory in `runs/`, so the first
-      assertion pins that it is still rejected and the second, after popping it, pins that no
-      other extra survives.
-    * `baselines:` and the two `disclosure:` widths have no values ANYWHERE in the spec --
-      `BaselinesConfig` and §21's "Disclosure thresholds" row are this package's originations.
-      Defaulting them so the fence loads clean would invent policy the spec declines to state,
-      and would delete the evidence that it declines to.
+    fence produced ELEVEN errors: those seven, `model`, and three `missing` keys -- `baselines:`
+    and the two `disclosure:` widths. Code could fix only the seven; the three were a spec gap,
+    and defaulting them in `config.py` would have invented policy the spec did not state.
+    `D-121` (2026-09-26) closed that gap in the spec instead: Appendix A now carries all three,
+    the widths labelled as the governance owner's policy under §21. What is left is `model:`,
+    Stage 5's block. Adding a field for it would put a key in `resolved_dict` and re-identify
+    every run directory in `runs/`, so the first assertion pins that it is the ONLY error and the
+    second, after popping it, that the rest of the fence loads clean.
     """
     fence = appendix_a_fence()
-    assert ("model", "extra_forbidden") in _error_locations(fence)
+    assert _error_locations(fence) == [("model", "extra_forbidden")]
 
     fence.pop("model")
-    assert _error_locations(fence) == [
-        ("baselines", "missing"),
-        ("disclosure.narrow_interval_absolute_width", "missing"),
-        ("disclosure.narrow_interval_relative_width", "missing"),
-    ]
+    Config.model_validate(fence)
 
 
 def test_the_spec_fence_declares_seven_inactive_sources_and_all_seven_load() -> None:

@@ -42,8 +42,8 @@ recorded residual and reports drift — a verifier, not a producer.
 `anchor.py`'s module docstring is the authoritative argument; read it before touching anything here.
 The load-bearing points:
 
-- §12.2 says "for a compatible national total $N_t$" and never defines *compatible*. §5.5 does. Nine
-  of its ten dimensions match by construction (same field, same QCEW file); the tenth — geography
+- §12.2 names this anchor as $N_t$ (since `D-120`) and grounds *compatible* in §5.5. Nine of §5.5's
+  ten dimensions match by construction (same field, same QCEW file); the tenth — geography
   universe — is what `closure_audit` measures.
 - The gate tests the **establishment universe, not employment**: national `qtrly_establishments`
   minus the sum over *all* published state rows (suppression hides employment, not establishment

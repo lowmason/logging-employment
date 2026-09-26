@@ -376,3 +376,29 @@ rewrite, the way plan 15 qualified the Stage 2 stamp; its `COMPLETE` line is unt
 `Exit`, which contradicted `Consumes` by pointing a planner back at Stage 4's acceptance run:
 
 > the promotion record states beat or not-beaten against Stage 4's numbers and the simpler method is selected when not beaten (§13.10 final line).
+
+## 2026-09-26 — `/deferred`: the two carved-out spec amendments get owners, then land
+
+`specs/completed/stage5-preconditions.md` §6 carved four spec amendments out of plan 13. The roadmap
+routed two of them: Appendix B to Stage 8 as a precondition, and the §13.10/§11.1 re-gate to Stage 7.
+The other two were owned by nothing once that spec retired. One `/deferred` pass filed them as `D-120`
+and `D-121`, closed both as quick fixes in commits of their own (`416f0f3`, `90b30e2`), and filed
+`D-122`, R-04's code clause, for this stage.
+
+- `D-120`: §12.2 now defines `N_t` as a declared anchor: the published national total the
+  establishment-closure gate admits, a `modeling_assumption` stamped `declared_national_total`, with
+  `SRC-QCEW-006`'s decline standing. It lists the three allowed `anchor_basis` values and the
+  retirement condition, and §15.2 lists `anchor_basis`. The retirement check has no implementation:
+  `baselines/runner.py::run_baselines` skips a month with an empty missing set without testing `R_t`.
+  That is unreachable on D1, where every month has a suppressed state cell, and `D-123` owns it.
+- `D-121`: Appendix A carries `config.yaml`'s `baselines:` block and both narrow-interval widths, the
+  widths labelled as the governance owner's policy (§21). The fence now fails only on `model:`.
+
+Checked while filing, against the spec at `f842897`. §15.2 contained no "compatible national total"
+text: it was a bare field list, and its gap was the absent field. §2.2's Reconciliation row names no
+total, so it holds once §12.2 names `N_t`, and it needed no edit.
+
+**Superseded reading** (stage-block rule 1), replaced in the roadmap's Stage 5 `Consumes`. It claimed
+§15.2 defines the residual, and it named an owner that could no longer act:
+
+> `reconcile/anchor.py::national_residual` stamps `anchor_basis = 'declared_national_total'` (Stage 3 `SHIPPED` point (5)), while spec §12.2 and §15.2 still define the residual against a "compatible national total", which SRC-QCEW-006 declined. That amendment, together with Appendix A's three missing fields, is owned only by the retired `specs/completed/stage5-preconditions.md` §6.

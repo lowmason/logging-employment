@@ -2324,3 +2324,120 @@ review and from fixing it.
       Size: quick-fix. Done when: those refusals raise named errors (`InfeasibleResidualError` for
       `integerize`, `SchemaMismatchError` for `discover_naics_predicate`), and their tests and the table
       say so.
+
+## /deferred owners — 2026-09-26
+
+Filed by a `/deferred` run scoped to the two spec amendments that `specs/completed/stage5-preconditions.md`
+§6 carved out as normative changes deserving their own review pass. Once that spec retired, no open item
+owned either; the roadmap's Stage 5 `Consumes` recorded the gap at `cf3ec14`. `D-122` is the code clause
+of the same review item, split from `D-120` so that item stays spec text. `D-123` is the identity check
+that the amended §12.2 requires and no code runs.
+
+- [x] `D-120` **§12.2 still allocates against a "compatible national total", and §15.2 has no field to say which anchor was used.**
+      §12.2 defines `R_t = N_t - sum_{s in D_t} E^obs` "for a compatible national total N_t" and calls it
+      "the required no-bound fast path". The spec's own Stage 0 stamp records `SRC-QCEW-006` as `decline`:
+      every one of the 96 testable months carries at least one suppressed states+DC cell. Stage 3 shipped a
+      substitute instead (`D-004`). `reconcile/anchor.py::national_residual` computes `R_t` from the
+      published national total and stamps `anchor_basis = 'declared_national_total'`, and
+      `assert_universe_closes` halts the run unless `closure_audit`'s establishment-count gap is 0 in every
+      month. The module docstring calls the anchor a `modeling_assumption` (INV-004), never a constraint
+      row, and carries its retirement condition. The spec says none of this, so a reader of §12.2
+      believes `N_t` is verified (F-004, `docs/reviews/2026-09-09-system-review.md`). §15.2's release
+      fields carry `reconciliation_status` but no `anchor_basis`, although `BASELINE_RESULT_SCHEMA` and
+      `VALIDATION_SCORE_SCHEMA` both do, so a release row cannot say its state total rests on an assumed
+      anchor. No §15.2 schema exists in `contracts.py` yet: `model_dependence_level` appears nowhere in
+      `src/`, and the one §15.2 name that does, `qcew_disclosure_code`, is a `TARGET_CELL_SCHEMA` column.
+      So today the field is spec text only, and nothing parses §12.2 or §15.2; once Stage 6 declares the
+      release table's schema, adding it becomes an ordered, fingerprinted schema change. §2.2's
+      Reconciliation row needs no edit: it names no total, and holds once §12.2 names
+      `N_t`. The field name is not open: `anchor_basis` and its closed set `contracts.ANCHOR_BASES` are
+      what both schemas and `assert_declared_provenance` use, and R-04's alternative,
+      `national_constraint_status`, appears nowhere in `src/` or the spec. This is R-04's spec remainder.
+      Its third clause, validating `Anchor.anchor_basis` at construction, is code, and is `D-122`.
+      A `/deferred` quick fix is the review pass §6 asked for: its own commit, with the amendment text
+      approved by the owner.
+      Target: before Stage 5's plan is written, since that stage reconciles every draw against this
+      anchor. Size: quick-fix. Done when: §12.2 says that `N_t` is the published national total the
+      establishment-closure gate admits, a `modeling_assumption` stamped
+      `anchor_basis = 'declared_national_total'`, that `SRC-QCEW-006`'s `decline` stands, and when the
+      anchor retires (`reconcile/anchor.py`'s RETIREMENT CONDITION); and §15.2 lists `anchor_basis`, its
+      values drawn from `contracts.ANCHOR_BASES`.
+      **→ done 2026-09-26 (/deferred quick fix).** §12.2 now computes `R_t` for "the compatible national
+      total N_t defined below", and defines it: the published national employment that the
+      establishment-closure gate admits, a `modeling_assumption` stamped `declared_national_total`, with
+      `SRC-QCEW-006`'s decline standing and the ceiling `E_{s,t} <= R_t` kept out of §9's bounds. It
+      also lists the three allowed `anchor_basis` values and states the retirement condition. §15.2
+      lists `anchor_basis` before `reconciliation_status`, as §7.13 and §7.14 do. The retirement check
+      has no implementation: `baselines/runner.py::run_baselines` skips a month with an empty missing
+      set without testing `R_t`, and `assert_universe_closes` refuses only a negative one. That is
+      unreachable on D1, where every month has a suppressed state cell; `D-123` owns it.
+- [x] `D-121` **Appendix A omits a block and two keys that `Config` requires: `baselines:` and the two `disclosure.narrow_interval_*` widths.**
+      R-S5P-6 (plan 13) took Appendix A's fence from eleven validation errors to four.
+      `tests/unit/test_config.py::test_the_spec_fence_is_short_only_the_keys_the_spec_never_states` pins
+      them: `model` as `extra_forbidden`, then, with `model` popped, exactly `baselines`,
+      `disclosure.narrow_interval_absolute_width` and `disclosure.narrow_interval_relative_width` as
+      `missing`. `model:` is Stage 5's own block and not this item: adding it to `Config` re-ids every run
+      directory unless it is kept out of `resolved_dict`, a choice `specs/completed/stage5-preconditions.md`
+      §4 leaves to Stage 5's plan. The other three cannot close in code without defaults the spec never
+      states. `config.yaml` carries all three: a `baselines:` block whose five keys equal
+      `BaselinesConfig`'s defaults, and widths `10` and `0.25` under the comment "Resolves §21's
+      'Disclosure thresholds' row: policy, not evidence. See plan 3." §21 assigns those thresholds to the
+      governance owner, and the test's docstring argues that the spec declines to state them. So one
+      ruling is left, and it is the owner's: whether the spec's example configuration carries the
+      configured values, or omits them on purpose. Neither branch reaches the destructive
+      `scripts/audit/` chain: its gate reads only the fence's `sources:` block
+      (`scripts/audit/verify_extracts.py::parse_appendix_a_sources`, an indentation reader that stops at
+      the next column-0 key), so the only tests that move are `test_config.py`'s.
+      Target: before Stage 5's plan is written, since that plan edits the same fence and the same test
+      for `model:`. Size: quick-fix. Done when: Appendix A carries a `baselines:` block and both widths,
+      labelled as configured by the governance owner per §21, the test's assertion after popping `model`
+      reads `[]`, and `_appendix_a_made_loadable` does nothing but pop `model`; or the owner rules the
+      omission deliberate, which retires this item and leaves the test's pin as the record.
+      **→ done 2026-09-26 (/deferred quick fix): the first branch, by the owner's ruling.** Appendix A
+      carries `config.yaml`'s `baselines:` block between `constraints:` and `model:`, in spec-section
+      order, and the two widths, `10` and `0.25`, labelled as configured by the governance owner under
+      §21. The test is renamed `test_the_spec_fence_loads_but_for_stage_5s_model_block`, because the
+      old name described a gap that no longer exists. It now pins `model` as the only error and a clean
+      load once it is popped; it was red against the unamended fence on exactly the three `missing`
+      keys. `_appendix_a_made_loadable` only pops `model`. Updated to match: the test constant's
+      header, now four differences from five, and `config.SourcesConfig`'s docstring.
+- [ ] `D-122` **An `Anchor` is built without checking `anchor_basis` against `ANCHOR_BASES`, and Stage 5's draws path checks it nowhere else.**
+      R-04 (`docs/reviews/2026-09-09-system-review.md`) asked for `Anchor.anchor_basis` to be "validated
+      against `ANCHOR_BASES` at construction (one `if` + one test)". `reconcile/anchor.py::Anchor` is a
+      frozen dataclass with `anchor_basis: str` and no `__post_init__`, so any string builds one. `D-043`
+      closed only the frame half, in plan 5: `contracts.assert_declared_provenance` refuses an undeclared
+      value on any frame carrying the column, and its callers are `baselines/runner.py::run_baselines`
+      and `validate/harness.py::run_pseudo_suppression`. Stage 5's `reconcile/draws.py::reconcile_draws`
+      takes the `Anchor` inside `ReconciliationInputs` directly, and §7.11's `posterior_summary` has no
+      `anchor_basis` column, so on that path a basis outside the set never meets the frame guard. Nothing
+      is wrong on D1: `national_residual` is the only constructor in `src/` and passes the constant
+      `DECLARED_NATIONAL_TOTAL`, so the check guards the next constructor, not a live defect.
+      `reconcile/scaling.py::Bounds.__post_init__` (`D-096`) is the same refusal, made once at
+      construction, in the same package.
+      Target: Stage 5, the first caller of `reconcile_draws`. Size: quick-fix. Done when: building an
+      `Anchor` whose `anchor_basis` is outside `contracts.ANCHOR_BASES` raises `ConceptViolationError`
+      carrying the value, the error `assert_declared_provenance` raises for the same defect on a frame,
+      and a test in `tests/unit/test_anchor.py` pins it.
+- [ ] `D-123` **A month with no suppressed state cell never tests the identity §12.2's retirement condition requires.**
+      Since `D-120`, spec §12.2 says that when a QCEW vintage yields a month with no suppressed state
+      cell, `SRC-QCEW-006` becomes testable there: "$|R_t|$ MUST be checked against tolerance there, a
+      miss MUST fail closed". No code does. `baselines/runner.py::run_baselines` skips a month whose
+      `anchor.missing_cells` is empty (`continue`) without reading `R_t`, `reconcile/allocate.py::allocate`
+      returns `{}` for one whatever `R_t` is, and `reconcile/anchor.py::assert_universe_closes` refuses a
+      residual only when it is negative, so a positive `R_t` on a fully disclosed month passes in
+      silence. The one test of the case,
+      `tests/unit/test_anchor.py::test_a_month_with_no_missing_cells_yields_no_anchor`, builds a month
+      where the identity holds (national 60, state 60). Latent on D1: measured 2026-09-26 on
+      `runs/4cf47a918dd8/baseline_results/anchor_audit.parquet`, 0 of 96 months have an empty missing
+      set, and the smallest has 9 cells. The fix is one site. `closure_audit` already records
+      `missing_set_size` and an integer `residual` per month, and `assert_universe_closes`, which halts
+      the run on a negative residual before any estimator runs, can refuse a month whose missing set is
+      empty and whose residual is not 0; an integer residual needs no float tolerance. The condition's
+      other half, a pass retiring the declared anchor for `verified_identity`, is not this item. A pass
+      raises nothing, and what it should license for months that still carry suppressed cells is a
+      decision for when such a month first appears; `anchor_audit.parquet` will show it as a row with
+      `missing_set_size` 0.
+      Size: quick-fix. Done when: a month with an empty missing set and a nonzero residual halts the run
+      with a named `errors.py` error carrying the month and the residual, and a test built beside
+      `test_a_month_with_no_missing_cells_yields_no_anchor` (national 61, state 60) fails before the
+      fix and passes after it.

@@ -108,9 +108,10 @@ class SourcesConfig(_Strict):
     Appendix A's `sources:` block lists ten. Seven of them -- `tpo`, `fia`, `ces`, `susb`, `bds`,
     `nonemployer`, `bea` -- carry `enabled: false` and belong to Stages 4-8; before they were
     declared here, `extra="forbid"` made the spec's own reference configuration unloadable, which
-    is `R-S5P-6`'s defect (`specs/completed/stage5-preconditions.md`) and what this fixes. `R-S5P-6` scopes
-    only these seven: Appendix A's `model:` block and its three MISSING keys are left failing on
-    purpose, and `tests/unit/test_config.py` asserts exactly what still fails.
+    is `R-S5P-6`'s defect (`specs/completed/stage5-preconditions.md`) and what this fixes. `R-S5P-6` scoped
+    only these seven. Appendix A's `model:` block is still left failing on purpose, and
+    `tests/unit/test_config.py` asserts it is the only thing that fails; the fence's three MISSING
+    keys were a spec gap, which `D-121` closed in Appendix A rather than with defaults here.
 
     They are declared as fields rather than admitted by `extra="allow"`
     so that a MISSPELLED source name is still a load-time error and so that `enabled: true` on an

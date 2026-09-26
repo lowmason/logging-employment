@@ -1428,7 +1428,7 @@ The predictive model ranks feasible allocations. The reconciliation layer maps e
 
 ### 12.2 Single national residual fast path
 
-Let $D_t$ be disclosed states and $M_t$ states requiring imputation. For a compatible national total $N_t$:
+Let $D_t$ be disclosed states and $M_t$ states requiring imputation. For the compatible national total $N_t$ defined below:
 
 ```math
 R_t=N_t-\sum_{s\in D_t}E^{obs}_{s,t}.
@@ -1443,6 +1443,37 @@ R_t\frac{q_{s,t}}{\sum_{j\in M_t}q_{j,t}}.
 ```
 
 This is the required no-bound fast path.
+
+$N_t$ is a declared anchor, not a verified identity. `SRC-QCEW-006` declined the employment identity
+$N_t=\sum_s E_{s,t}$ as untestable, because every month of the D1 window carries at least one
+suppressed state cell (Stage 0 stamp). $N_t$ is instead the published national QCEW employment for
+the same industry, ownership and month, taken from the same field of the same file as the state rows,
+so every §5.5 dimension except the geography universe matches by construction. An
+establishment-closure gate tests the geography universe. In every month, the national establishment
+count minus the sum over all published state rows MUST be exactly zero, and $R_t$ MUST be
+nonnegative. The sum includes employment-suppressed rows, because suppression withholds employment
+but not establishment counts. A failure in any month halts the run (§18.3) rather than declining
+that month.
+
+The gate tests the establishment universe, not employment, so `SRC-QCEW-006`'s decline stands and
+allocating $R_t$ rests on a modeling assumption (INV-004). Every row whose allocation target is this
+$R_t$ carries `anchor_basis = 'declared_national_total'`. The assumption never becomes a constraint
+row (INV-005), and the ceiling $E_{s,t}\le R_t$ that it implies for $s\in M_t$ MUST NOT be written
+into §9's deterministic bounds.
+
+Allowed `anchor_basis` values:
+
+```text
+declared_national_total
+verified_identity
+none
+```
+
+`anchor_basis` records what licensed the allocation target; `none` means nothing did. Only
+`declared_national_total` is reachable on the D1 window. `verified_identity` is for the anchor's
+retirement. When a QCEW vintage yields a month with no suppressed state cell, `SRC-QCEW-006` becomes
+testable on that month: $|R_t|$ MUST be checked against tolerance there, a miss MUST fail closed,
+and a pass retires the declared anchor in favour of the verified identity rather than keeping both.
 
 ### 12.3 Bounded proportional scaling
 
@@ -1766,12 +1797,16 @@ qcew_disclosure_code
 model_dependence_level
 model_sensitivity_low
 model_sensitivity_high
+anchor_basis
 reconciliation_status
 release_status
 source_vintage_set
 model_version
 run_id
 ```
+
+`anchor_basis` takes §12.2's values and records what licensed the row's state total, so a release row
+can say when that total rests on the declared anchor rather than on a verified identity.
 
 ### 15.3 Model-dependence levels
 
@@ -2223,6 +2258,14 @@ constraints:
   feasibility_tolerance: 1.0e-7
   rank_tolerance: 1.0e-10
 
+baselines:
+  # §10's transparent baselines. This package originated these keys; §10 names none of them.
+  allow_declared_composite: true
+  composite_fallback: 'establishment_proportional'
+  historical_lookback_months: 24
+  historical_may_cross_naics_vintage: false
+  regression_ridge_penalty: 1.0
+
 model:
   backend: 'numpyro'
   chains: 4
@@ -2269,6 +2312,9 @@ disclosure:
   exact_reconstruction_action: 'withhold'
   narrow_interval_action: 'manual_review'
   publish_label_required: true
+  # Configured by the governance owner (§21, "Disclosure thresholds"): policy, not evidence.
+  narrow_interval_absolute_width: 10
+  narrow_interval_relative_width: 0.25
 ```
 
 ---
