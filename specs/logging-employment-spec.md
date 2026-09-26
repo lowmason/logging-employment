@@ -1472,8 +1472,9 @@ none
 `anchor_basis` records what licensed the allocation target; `none` means nothing did. Only
 `declared_national_total` is reachable on the D1 window. `verified_identity` is for the anchor's
 retirement. When a QCEW vintage yields a month with no suppressed state cell, `SRC-QCEW-006` becomes
-testable on that month: $|R_t|$ MUST be checked against tolerance there, a miss MUST fail closed,
-and a pass retires the declared anchor in favour of the verified identity rather than keeping both.
+testable on that month: $R_t$ MUST be exactly zero there, because it is a difference of published
+integer counts and no arithmetic tolerance applies; a nonzero $R_t$ MUST fail closed, and a pass
+retires the declared anchor in favour of the verified identity rather than keeping both.
 
 ### 12.3 Bounded proportional scaling
 

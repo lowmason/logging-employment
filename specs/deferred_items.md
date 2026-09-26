@@ -2401,7 +2401,7 @@ that the amended §12.2 requires and no code runs.
       load once it is popped; it was red against the unamended fence on exactly the three `missing`
       keys. `_appendix_a_made_loadable` only pops `model`. Updated to match: the test constant's
       header, now four differences from five, and `config.SourcesConfig`'s docstring.
-- [ ] `D-122` **An `Anchor` is built without checking `anchor_basis` against `ANCHOR_BASES`, and Stage 5's draws path checks it nowhere else.**
+- [x] `D-122` **An `Anchor` is built without checking `anchor_basis` against `ANCHOR_BASES`, and Stage 5's draws path checks it nowhere else.**
       R-04 (`docs/reviews/2026-09-09-system-review.md`) asked for `Anchor.anchor_basis` to be "validated
       against `ANCHOR_BASES` at construction (one `if` + one test)". `reconcile/anchor.py::Anchor` is a
       frozen dataclass with `anchor_basis: str` and no `__post_init__`, so any string builds one. `D-043`
@@ -2418,7 +2418,14 @@ that the amended §12.2 requires and no code runs.
       `Anchor` whose `anchor_basis` is outside `contracts.ANCHOR_BASES` raises `ConceptViolationError`
       carrying the value, the error `assert_declared_provenance` raises for the same defect on a frame,
       and a test in `tests/unit/test_anchor.py` pins it.
-- [ ] `D-123` **A month with no suppressed state cell never tests the identity §12.2's retirement condition requires.**
+      **→ done 2026-09-26 (/deferred quick fix).** `Anchor.__post_init__` refuses a basis outside
+      `contracts.ANCHOR_BASES` with `ConceptViolationError`, whose message carries the month, the value
+      and the declared set. `tests/unit/test_anchor.py::test_an_anchor_with_an_undeclared_basis_is_refused_when_built`
+      failed first (`DID NOT RAISE`) on `declared_national_totals`, a one-letter typo, and passes now.
+      `test_every_declared_basis_builds_an_anchor` pins that all three declared values still build.
+      Every test that builds an `Anchor` directly already passed `declared_national_total`, so none
+      moved. `reconcile/CLAUDE.md` records the contract.
+- [x] `D-123` **A month with no suppressed state cell never tests the identity §12.2's retirement condition requires.**
       Since `D-120`, spec §12.2 says that when a QCEW vintage yields a month with no suppressed state
       cell, `SRC-QCEW-006` becomes testable there: "$|R_t|$ MUST be checked against tolerance there, a
       miss MUST fail closed". No code does. `baselines/runner.py::run_baselines` skips a month whose
@@ -2441,3 +2448,17 @@ that the amended §12.2 requires and no code runs.
       with a named `errors.py` error carrying the month and the residual, and a test built beside
       `test_a_month_with_no_missing_cells_yields_no_anchor` (national 61, state 60) fails before the
       fix and passes after it.
+      **→ done 2026-09-26 (/deferred quick fix).** `assert_universe_closes` refuses an audit row whose
+      `missing_set_size` is 0 and whose integer `residual` is not 0, raising `UniverseClosureError` with
+      the month, national total, disclosed sum and residual. It is the third check, after the
+      establishment gap and the negative residual, so the existing gap test still fires on its gap.
+      `tests/unit/test_anchor.py::test_a_fully_disclosed_month_whose_national_total_disagrees_halts_the_run`
+      failed first (`DID NOT RAISE`) and passes now, and
+      `test_a_fully_disclosed_month_whose_identity_holds_passes_the_gate` pins that a pass raises
+      nothing. The suite rose from 1532 to 1538 passed with nothing else moved, so no fixture relied on
+      the silent pass. Updated to match: the module's RETIREMENT CONDITION, `UniverseClosureError`'s
+      docstring and `reconcile/CLAUDE.md`. The pass half stays as recorded above: nothing retires the
+      anchor automatically. The §12.2 sentence quoted above said "checked against tolerance", which a
+      Codex review on PR #34 read as the configured `reconciliation.tolerance`. That tolerance bounds
+      float drift in reconciled estimates, not a difference of published counts. §12.2 now says
+      `R_t` MUST be exactly zero there, matching the code; the quote above is the text as filed.

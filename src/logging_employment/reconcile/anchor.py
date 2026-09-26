@@ -34,9 +34,10 @@ a threshold guess, which is what distinguishes it from §9.3's "arbitrary top-cl
 never be written back into `deterministic_bounds`.
 
 RETIREMENT CONDITION. If a future QCEW vintage ever yields a month with no suppressed state cell,
-`SRC-QCEW-006` becomes testable on that month. At that point assert `abs(R_t) <= tolerance`, fail
-closed otherwise, and retire this anchor in favour of the verified identity -- rather than keeping
-both and letting them disagree silently.
+`SRC-QCEW-006` becomes testable on that month, and `assert_universe_closes` then refuses a nonzero
+residual there, halting the run (D-123). A pass raises nothing and is recorded only as that month's
+audit row. Retiring this anchor in favour of the verified identity -- rather than keeping both and
+letting them disagree silently -- is the decision to take when such a month first appears.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from ..contracts import ANCHOR_AUDIT_SCHEMA
+from ..contracts import ANCHOR_AUDIT_SCHEMA, ANCHOR_BASES
 from ..errors import ConceptViolationError, UniverseClosureError
 
 DISCLOSED_STATUSES: tuple[str, ...] = ("observed", "true_zero")
@@ -75,6 +76,22 @@ class Anchor:
     residual: float
     missing_cells: tuple[str, ...]
     anchor_basis: str
+
+    def __post_init__(self) -> None:
+        """Refuse an `anchor_basis` outside `contracts.ANCHOR_BASES` (D-122).
+
+        Refused HERE, once, when the anchor is built. `assert_declared_provenance` refuses the same
+        defect on any frame carrying the column, but it sees only frames: Stage 5's
+        `reconcile_draws` takes the `Anchor` itself, and §7.11's `posterior_summary` has no
+        `anchor_basis` column, so on that path an undeclared basis would meet no guard at all.
+        `scaling.Bounds.__post_init__` (D-096) makes the same choice for an inverted bound.
+        """
+        if self.anchor_basis not in ANCHOR_BASES:
+            raise ConceptViolationError(
+                f"{self.reference_month}: anchor_basis {self.anchor_basis!r} is undeclared; the "
+                f"declared set is {list(ANCHOR_BASES)}. The basis records what licensed the "
+                "allocation target (§12.2), so an undeclared one is provenance nothing granted."
+            )
 
 
 def observed_partition(monthly: pl.DataFrame) -> dict[str, Partition]:
@@ -210,6 +227,11 @@ def assert_universe_closes(audit: pl.DataFrame) -> None:
 
     Not a per-month decline. A nonzero gap means the published national row contains a component
     the state table does not, which makes every month's residual suspect rather than one month's.
+
+    It also halts on the one shape where §12.2's retirement condition makes the employment identity
+    testable (D-123): a month with no suppressed state cell, whose residual has nowhere to go. That
+    residual must be exactly 0 rather than within a float tolerance, because the audit records it
+    as an integer count. A pass raises nothing; its audit row, `missing_set_size` 0, is the record.
     """
     broken = audit.filter(pl.col("establishment_gap") != 0)
     if broken.height:
@@ -227,4 +249,13 @@ def assert_universe_closes(audit: pl.DataFrame) -> None:
         raise UniverseClosureError(
             f"{first['reference_month']}: residual {first['residual']} is negative, so the "
             "disclosed cells already exceed the published national total"
+        )
+    identity_misses = audit.filter((pl.col("missing_set_size") == 0) & (pl.col("residual") != 0))
+    if identity_misses.height:
+        first = identity_misses.row(0, named=True)
+        raise UniverseClosureError(
+            f"{first['reference_month']}: no state cell is suppressed, so SRC-QCEW-006's identity "
+            f"is testable here, and it fails: national {first['national_total']} minus disclosed "
+            f"sum {first['disclosed_sum']} leaves residual {first['residual']} with nowhere to go "
+            "(§12.2's retirement condition)"
         )
