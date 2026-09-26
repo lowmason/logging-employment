@@ -2332,7 +2332,7 @@ Filed by a `/deferred` run scoped to the two spec amendments that `specs/complet
 owned either; the roadmap's Stage 5 `Consumes` recorded the gap at `cf3ec14`. `D-122` is the code clause
 of the same review item, split from `D-120` so that item stays spec text.
 
-- [ ] `D-120` **§12.2 still allocates against a "compatible national total", and §15.2 has no field to say which anchor was used.**
+- [x] `D-120` **§12.2 still allocates against a "compatible national total", and §15.2 has no field to say which anchor was used.**
       §12.2 defines `R_t = N_t - sum_{s in D_t} E^obs` "for a compatible national total N_t" and calls it
       "the required no-bound fast path". The spec's own Stage 0 stamp records `SRC-QCEW-006` as `decline`:
       every one of the 96 testable months carries at least one suppressed states+DC cell. Stage 3 shipped a
@@ -2361,6 +2361,15 @@ of the same review item, split from `D-120` so that item stays spec text.
       `anchor_basis = 'declared_national_total'`, that `SRC-QCEW-006`'s `decline` stands, and when the
       anchor retires (`reconcile/anchor.py`'s RETIREMENT CONDITION); and §15.2 lists `anchor_basis`, its
       values drawn from `contracts.ANCHOR_BASES`.
+      **→ done 2026-09-26 (/deferred quick fix).** §12.2 now computes `R_t` for "the compatible national
+      total N_t defined below", and defines it: the published national employment that the
+      establishment-closure gate admits, a `modeling_assumption` stamped `declared_national_total`, with
+      `SRC-QCEW-006`'s decline standing and the ceiling `E_{s,t} <= R_t` kept out of §9's bounds. It
+      also lists the three allowed `anchor_basis` values and states the retirement condition. §15.2
+      lists `anchor_basis` before `reconciliation_status`, as §7.13 and §7.14 do. The retirement check
+      has no implementation: `baselines/runner.py::run_baselines` skips a month with an empty missing
+      set without testing `R_t`, and `assert_universe_closes` refuses only a negative one. That is
+      unreachable on D1, where every month has a suppressed state cell.
 - [ ] `D-121` **Appendix A omits a block and two keys that `Config` requires: `baselines:` and the two `disclosure.narrow_interval_*` widths.**
       R-S5P-6 (plan 13) took Appendix A's fence from eleven validation errors to four.
       `tests/unit/test_config.py::test_the_spec_fence_is_short_only_the_keys_the_spec_never_states` pins
