@@ -2330,7 +2330,8 @@ review and from fixing it.
 Filed by a `/deferred` run scoped to the two spec amendments that `specs/completed/stage5-preconditions.md`
 §6 carved out as normative changes deserving their own review pass. Once that spec retired, no open item
 owned either; the roadmap's Stage 5 `Consumes` recorded the gap at `cf3ec14`. `D-122` is the code clause
-of the same review item, split from `D-120` so that item stays spec text.
+of the same review item, split from `D-120` so that item stays spec text. `D-123` is the identity check
+that the amended §12.2 requires and no code runs.
 
 - [x] `D-120` **§12.2 still allocates against a "compatible national total", and §15.2 has no field to say which anchor was used.**
       §12.2 defines `R_t = N_t - sum_{s in D_t} E^obs` "for a compatible national total N_t" and calls it
@@ -2369,7 +2370,7 @@ of the same review item, split from `D-120` so that item stays spec text.
       lists `anchor_basis` before `reconciliation_status`, as §7.13 and §7.14 do. The retirement check
       has no implementation: `baselines/runner.py::run_baselines` skips a month with an empty missing
       set without testing `R_t`, and `assert_universe_closes` refuses only a negative one. That is
-      unreachable on D1, where every month has a suppressed state cell.
+      unreachable on D1, where every month has a suppressed state cell; `D-123` owns it.
 - [x] `D-121` **Appendix A omits a block and two keys that `Config` requires: `baselines:` and the two `disclosure.narrow_interval_*` widths.**
       R-S5P-6 (plan 13) took Appendix A's fence from eleven validation errors to four.
       `tests/unit/test_config.py::test_the_spec_fence_is_short_only_the_keys_the_spec_never_states` pins
@@ -2417,3 +2418,26 @@ of the same review item, split from `D-120` so that item stays spec text.
       `Anchor` whose `anchor_basis` is outside `contracts.ANCHOR_BASES` raises `ConceptViolationError`
       carrying the value, the error `assert_declared_provenance` raises for the same defect on a frame,
       and a test in `tests/unit/test_anchor.py` pins it.
+- [ ] `D-123` **A month with no suppressed state cell never tests the identity §12.2's retirement condition requires.**
+      Since `D-120`, spec §12.2 says that when a QCEW vintage yields a month with no suppressed state
+      cell, `SRC-QCEW-006` becomes testable there: "$|R_t|$ MUST be checked against tolerance there, a
+      miss MUST fail closed". No code does. `baselines/runner.py::run_baselines` skips a month whose
+      `anchor.missing_cells` is empty (`continue`) without reading `R_t`, `reconcile/allocate.py::allocate`
+      returns `{}` for one whatever `R_t` is, and `reconcile/anchor.py::assert_universe_closes` refuses a
+      residual only when it is negative, so a positive `R_t` on a fully disclosed month passes in
+      silence. The one test of the case,
+      `tests/unit/test_anchor.py::test_a_month_with_no_missing_cells_yields_no_anchor`, builds a month
+      where the identity holds (national 60, state 60). Latent on D1: measured 2026-09-26 on
+      `runs/4cf47a918dd8/baseline_results/anchor_audit.parquet`, 0 of 96 months have an empty missing
+      set, and the smallest has 9 cells. The fix is one site. `closure_audit` already records
+      `missing_set_size` and an integer `residual` per month, and `assert_universe_closes`, which halts
+      the run on a negative residual before any estimator runs, can refuse a month whose missing set is
+      empty and whose residual is not 0; an integer residual needs no float tolerance. The condition's
+      other half, a pass retiring the declared anchor for `verified_identity`, is not this item. A pass
+      raises nothing, and what it should license for months that still carry suppressed cells is a
+      decision for when such a month first appears; `anchor_audit.parquet` will show it as a row with
+      `missing_set_size` 0.
+      Size: quick-fix. Done when: a month with an empty missing set and a nonzero residual halts the run
+      with a named `errors.py` error carrying the month and the residual, and a test built beside
+      `test_a_month_with_no_missing_cells_yields_no_anchor` (national 61, state 60) fails before the
+      fix and passes after it.

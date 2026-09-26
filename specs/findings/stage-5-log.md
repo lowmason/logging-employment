@@ -390,7 +390,7 @@ and `D-121`, closed both as quick fixes in commits of their own (`416f0f3`, `90b
   `SRC-QCEW-006`'s decline standing. It lists the three allowed `anchor_basis` values and the
   retirement condition, and §15.2 lists `anchor_basis`. The retirement check has no implementation:
   `baselines/runner.py::run_baselines` skips a month with an empty missing set without testing `R_t`.
-  That is unreachable on D1, where every month has a suppressed state cell.
+  That is unreachable on D1, where every month has a suppressed state cell, and `D-123` owns it.
 - `D-121`: Appendix A carries `config.yaml`'s `baselines:` block and both narrow-interval widths, the
   widths labelled as the governance owner's policy (§21). The fence now fails only on `model:`.
 
