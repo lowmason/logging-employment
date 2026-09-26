@@ -2458,4 +2458,7 @@ that the amended §12.2 requires and no code runs.
       nothing. The suite rose from 1532 to 1538 passed with nothing else moved, so no fixture relied on
       the silent pass. Updated to match: the module's RETIREMENT CONDITION, `UniverseClosureError`'s
       docstring and `reconcile/CLAUDE.md`. The pass half stays as recorded above: nothing retires the
-      anchor automatically.
+      anchor automatically. The §12.2 sentence quoted above said "checked against tolerance", which a
+      Codex review on PR #34 read as the configured `reconciliation.tolerance`. That tolerance bounds
+      float drift in reconciled estimates, not a difference of published counts. §12.2 now says
+      `R_t` MUST be exactly zero there, matching the code; the quote above is the text as filed.
