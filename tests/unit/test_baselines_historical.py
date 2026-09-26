@@ -622,3 +622,73 @@ def test_the_break_adjusted_docstring_declares_its_refusal() -> None:
     assert "THE EARLIEST TIED STEP WINS" in doc
     # R-BREAK-4: the replaced claim named a threshold of four, and both its halves are now false.
     assert "below four" not in doc
+
+
+def _discounted(history: list[tuple[str, float]]) -> float | None:
+    """`ExponentiallyWeightedShare._reduce` on a hand-built `(month, share)` history, oldest first.
+
+    The anchor is `None` rather than a stub, for the reason `_reduce_shares` gives: the discount
+    counts each share's age back from the NEWEST observation, so the target month cannot move the
+    normalized mean, and a revision that starts reading the anchor raises here instead of quietly
+    agreeing. The history is real, because the age of a share is read from its `reference_month`.
+    """
+    frame = pl.DataFrame(
+        {"reference_month": [month for month, _ in history], "share": [s for _, s in history]},
+        schema={"reference_month": pl.String, "share": pl.Float64},
+    )
+    return ExponentiallyWeightedShare()._reduce(frame["share"].to_list(), None, frame)
+
+
+def test_a_share_a_year_older_than_the_newest_counts_half() -> None:
+    """D-113: the half-life is twelve CALENDAR months, so shares a year apart weigh 1 and 1/2 and
+    the mean is (2 x newer + older) / 3 -- derived from the half-life, not from the code's
+    expression. The per-observation discount weighed the older share 2 ** (-1/12), about 0.944,
+    because the two are adjacent in the list however many months separate them."""
+    older, newer = 0.03, 0.06
+    reduced = _discounted([("2023-02", older), ("2024-02", newer)])
+    assert reduced == pytest.approx((2 * newer + older) / 3)
+
+
+def test_the_older_share_loses_weight_as_the_gap_before_the_newer_one_widens() -> None:
+    """D-113's defect as a property: the same two shares, one month, six months and a year apart.
+    Discounted per observation all three reduce to one number, since only list position is read.
+    The adjacent pair straddles a year boundary, so an age computed from the month of the year
+    alone -- 1 - 12 -- cannot pass for a calendar age."""
+    older, newer = 0.03, 0.06
+    adjacent = _discounted([("2023-12", older), ("2024-01", newer)])
+    half_year = _discounted([("2023-07", older), ("2024-01", newer)])
+    full_year = _discounted([("2023-01", older), ("2024-01", newer)])
+    assert adjacent < half_year < full_year < newer
+
+
+def test_a_gap_free_history_reduces_exactly_as_the_per_observation_discount_did() -> None:
+    """The property that confines D-113 to gappy histories. Where no month is missing, calendar
+    age and list position coincide, so the weights are the same floats in the same order and the
+    mean is bit-identical to the discount this class used to apply -- compared with `==`, not
+    `approx`. The half-life is recomputed here rather than read from the class, so a change to it
+    reddens this test as well."""
+    months = ["2023-10", "2023-11", "2023-12", "2024-01", "2024-02"]
+    shares = [0.031, 0.047, 0.029, 0.052, 0.044]
+    decay = 0.5 ** (1.0 / 12.0)
+    positional = [decay ** (len(shares) - 1 - i) for i in range(len(shares))]
+    per_observation = sum(w * s for w, s in zip(positional, shares, strict=True)) / sum(positional)
+    assert _discounted(list(zip(months, shares, strict=True))) == per_observation
+
+
+def test_a_gappy_history_is_discounted_by_calendar_month_through_weights(
+    make_monthly, appendix_a_config
+) -> None:
+    """D-113 end to end: `weights` reads the history `observed_share_history` builds, so this is
+    what pins the pairing of each share with its own `reference_month`. State 01 is published in
+    2023-02 and 2024-02 only and suppressed at the 2024-03 anchor; its shares are 30 and 60 of a
+    national 1,000, a year apart, so the own arm is (2 x 0.06 + 0.03) / 3 = 0.05 of 2024-03's
+    national 1,000. The per-observation discount gave about 45.4."""
+    monthly = make_monthly(*_share_rows(["2023-02", "2024-02"], [30, 60]))
+    partitions = observed_partition(monthly)
+    anchor = national_residual(monthly, partitions["2024-03"], reference_month="2024-03")
+    assert anchor.missing_cells == ("01",)
+
+    out = ExponentiallyWeightedShare().weights(_context(monthly, appendix_a_config), anchor)
+
+    assert out.basis["01"] == OWN
+    assert out.values["01"] == pytest.approx(50.0)
