@@ -48,7 +48,9 @@ The load-bearing points:
 - The gate tests the **establishment universe, not employment**: national `qtrly_establishments`
   minus the sum over *all* published state rows (suppression hides employment, not establishment
   counts) must be exactly 0. `assert_universe_closes` (`anchor.py::assert_universe_closes`) halts the **whole run**, not
-  one month, and also refuses any negative residual.
+  one month, and also refuses any negative residual. Its one employment test is a month with no
+  suppressed state cell, where §12.2's identity is testable: a nonzero residual there halts the run
+  too (`D-123`). No D1 month has an empty missing set, so on D1 it never fires.
 - `SRC-QCEW-006` came back `decline` (the argument is in `constraints/CLAUDE.md`), so no national
   employment margin may ever become a constraint row. The anchor is `anchor_basis =
   'declared_national_total'`, a `modeling_assumption` under INV-004/INV-005. The implied ceiling

@@ -34,9 +34,10 @@ a threshold guess, which is what distinguishes it from §9.3's "arbitrary top-cl
 never be written back into `deterministic_bounds`.
 
 RETIREMENT CONDITION. If a future QCEW vintage ever yields a month with no suppressed state cell,
-`SRC-QCEW-006` becomes testable on that month. At that point assert `abs(R_t) <= tolerance`, fail
-closed otherwise, and retire this anchor in favour of the verified identity -- rather than keeping
-both and letting them disagree silently.
+`SRC-QCEW-006` becomes testable on that month, and `assert_universe_closes` then refuses a nonzero
+residual there, halting the run (D-123). A pass raises nothing and is recorded only as that month's
+audit row. Retiring this anchor in favour of the verified identity -- rather than keeping both and
+letting them disagree silently -- is the decision to take when such a month first appears.
 """
 
 from __future__ import annotations
@@ -226,6 +227,11 @@ def assert_universe_closes(audit: pl.DataFrame) -> None:
 
     Not a per-month decline. A nonzero gap means the published national row contains a component
     the state table does not, which makes every month's residual suspect rather than one month's.
+
+    It also halts on the one shape where §12.2's retirement condition makes the employment identity
+    testable (D-123): a month with no suppressed state cell, whose residual has nowhere to go. That
+    residual must be exactly 0 rather than within a float tolerance, because the audit records it
+    as an integer count. A pass raises nothing; its audit row, `missing_set_size` 0, is the record.
     """
     broken = audit.filter(pl.col("establishment_gap") != 0)
     if broken.height:
@@ -243,4 +249,13 @@ def assert_universe_closes(audit: pl.DataFrame) -> None:
         raise UniverseClosureError(
             f"{first['reference_month']}: residual {first['residual']} is negative, so the "
             "disclosed cells already exceed the published national total"
+        )
+    identity_misses = audit.filter((pl.col("missing_set_size") == 0) & (pl.col("residual") != 0))
+    if identity_misses.height:
+        first = identity_misses.row(0, named=True)
+        raise UniverseClosureError(
+            f"{first['reference_month']}: no state cell is suppressed, so SRC-QCEW-006's identity "
+            f"is testable here, and it fails: national {first['national_total']} minus disclosed "
+            f"sum {first['disclosed_sum']} leaves residual {first['residual']} with nowhere to go "
+            "(§12.2's retirement condition)"
         )

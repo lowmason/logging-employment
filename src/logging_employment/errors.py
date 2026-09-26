@@ -87,8 +87,11 @@ class SolverError(LoggingEmploymentError):
 
 
 class UniverseClosureError(LoggingEmploymentError):
-    """The establishment universes of the national row and the state rows do not close.
+    """The national row and the state rows do not close.
 
+    `reconcile.anchor.assert_universe_closes` raises it in three shapes: the establishment
+    universes differ, a residual is negative, or a month with no suppressed state cell leaves a
+    nonzero residual, the one month where §12.2's employment identity is testable (D-123).
     §18.3 requires the pipeline to fail rather than guess when source universes cannot be
     reconciled. This is a whole-run halt, not a per-month decline: a nonzero gap means the
     published national row contains something the state table does not, and every month's

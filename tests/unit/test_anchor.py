@@ -250,6 +250,47 @@ def test_a_month_with_no_missing_cells_yields_no_anchor(make_monthly) -> None:
     assert anchor.residual == 0.0
 
 
+def _one_fully_disclosed_month(make_monthly, national_employment: int) -> pl.DataFrame:
+    """A month whose only state is published: its missing set is empty and its universes close."""
+    return make_monthly(
+        {
+            "area_type": "national",
+            "area_fips": "US000",
+            "state_fips": None,
+            "aggregation_level": "18",
+            "employment_value": national_employment,
+            "qtrly_establishments": 6,
+        },
+        {
+            "state_fips": "01",
+            "area_fips": "01000",
+            "employment_value": 60,
+            "qtrly_establishments": 6,
+            "observation_status": "observed",
+        },
+    )
+
+
+def test_a_fully_disclosed_month_whose_national_total_disagrees_halts_the_run(make_monthly) -> None:
+    """D-123, §12.2's retirement condition: with no suppressed state cell the identity is testable.
+
+    `SRC-QCEW-006` could not test `N_t = sum_s E_s` on the D1 window, because every month there
+    carries a suppressed state cell. A month with none makes the identity testable, and a miss
+    must fail closed rather than pass as a month that "needs no anchor". The universes close here
+    (6 = 6 establishments), so the employment identity is the only thing that can refuse it.
+    """
+    monthly = _one_fully_disclosed_month(make_monthly, national_employment=61)
+    audit = closure_audit(monthly, observed_partition(monthly))
+    with pytest.raises(UniverseClosureError, match=r"2024-03.*residual 1\b"):
+        assert_universe_closes(audit)
+
+
+def test_a_fully_disclosed_month_whose_identity_holds_passes_the_gate(make_monthly) -> None:
+    """The pass half raises nothing: the gate refuses a miss, not every fully disclosed month."""
+    monthly = _one_fully_disclosed_month(make_monthly, national_employment=60)
+    assert_universe_closes(closure_audit(monthly, observed_partition(monthly)))
+
+
 def test_a_national_month_with_no_state_rows_is_still_gated(make_monthly) -> None:
     """The audit is driven by the panel's months, not by the partition's keys.
 

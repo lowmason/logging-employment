@@ -2425,7 +2425,7 @@ that the amended §12.2 requires and no code runs.
       `test_every_declared_basis_builds_an_anchor` pins that all three declared values still build.
       Every test that builds an `Anchor` directly already passed `declared_national_total`, so none
       moved. `reconcile/CLAUDE.md` records the contract.
-- [ ] `D-123` **A month with no suppressed state cell never tests the identity §12.2's retirement condition requires.**
+- [x] `D-123` **A month with no suppressed state cell never tests the identity §12.2's retirement condition requires.**
       Since `D-120`, spec §12.2 says that when a QCEW vintage yields a month with no suppressed state
       cell, `SRC-QCEW-006` becomes testable there: "$|R_t|$ MUST be checked against tolerance there, a
       miss MUST fail closed". No code does. `baselines/runner.py::run_baselines` skips a month whose
@@ -2448,3 +2448,14 @@ that the amended §12.2 requires and no code runs.
       with a named `errors.py` error carrying the month and the residual, and a test built beside
       `test_a_month_with_no_missing_cells_yields_no_anchor` (national 61, state 60) fails before the
       fix and passes after it.
+      **→ done 2026-09-26 (/deferred quick fix).** `assert_universe_closes` refuses an audit row whose
+      `missing_set_size` is 0 and whose integer `residual` is not 0, raising `UniverseClosureError` with
+      the month, national total, disclosed sum and residual. It is the third check, after the
+      establishment gap and the negative residual, so the existing gap test still fires on its gap.
+      `tests/unit/test_anchor.py::test_a_fully_disclosed_month_whose_national_total_disagrees_halts_the_run`
+      failed first (`DID NOT RAISE`) and passes now, and
+      `test_a_fully_disclosed_month_whose_identity_holds_passes_the_gate` pins that a pass raises
+      nothing. The suite rose from 1532 to 1538 passed with nothing else moved, so no fixture relied on
+      the silent pass. Updated to match: the module's RETIREMENT CONDITION, `UniverseClosureError`'s
+      docstring and `reconcile/CLAUDE.md`. The pass half stays as recorded above: nothing retires the
+      anchor automatically.
