@@ -2370,7 +2370,7 @@ of the same review item, split from `D-120` so that item stays spec text.
       has no implementation: `baselines/runner.py::run_baselines` skips a month with an empty missing
       set without testing `R_t`, and `assert_universe_closes` refuses only a negative one. That is
       unreachable on D1, where every month has a suppressed state cell.
-- [ ] `D-121` **Appendix A omits a block and two keys that `Config` requires: `baselines:` and the two `disclosure.narrow_interval_*` widths.**
+- [x] `D-121` **Appendix A omits a block and two keys that `Config` requires: `baselines:` and the two `disclosure.narrow_interval_*` widths.**
       R-S5P-6 (plan 13) took Appendix A's fence from eleven validation errors to four.
       `tests/unit/test_config.py::test_the_spec_fence_is_short_only_the_keys_the_spec_never_states` pins
       them: `model` as `extra_forbidden`, then, with `model` popped, exactly `baselines`,
@@ -2392,6 +2392,14 @@ of the same review item, split from `D-120` so that item stays spec text.
       labelled as configured by the governance owner per §21, the test's assertion after popping `model`
       reads `[]`, and `_appendix_a_made_loadable` does nothing but pop `model`; or the owner rules the
       omission deliberate, which retires this item and leaves the test's pin as the record.
+      **→ done 2026-09-26 (/deferred quick fix): the first branch, by the owner's ruling.** Appendix A
+      carries `config.yaml`'s `baselines:` block between `constraints:` and `model:`, in spec-section
+      order, and the two widths, `10` and `0.25`, labelled as configured by the governance owner under
+      §21. The test is renamed `test_the_spec_fence_loads_but_for_stage_5s_model_block`, because the
+      old name described a gap that no longer exists. It now pins `model` as the only error and a clean
+      load once it is popped; it was red against the unamended fence on exactly the three `missing`
+      keys. `_appendix_a_made_loadable` only pops `model`. Updated to match: the test constant's
+      header, now four differences from five, and `config.SourcesConfig`'s docstring.
 - [ ] `D-122` **An `Anchor` is built without checking `anchor_basis` against `ANCHOR_BASES`, and Stage 5's draws path checks it nowhere else.**
       R-04 (`docs/reviews/2026-09-09-system-review.md`) asked for `Anchor.anchor_basis` to be "validated
       against `ANCHOR_BASES` at construction (one `if` + one test)". `reconcile/anchor.py::Anchor` is a

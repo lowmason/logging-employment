@@ -2258,6 +2258,14 @@ constraints:
   feasibility_tolerance: 1.0e-7
   rank_tolerance: 1.0e-10
 
+baselines:
+  # §10's transparent baselines. This package originated these keys; §10 names none of them.
+  allow_declared_composite: true
+  composite_fallback: 'establishment_proportional'
+  historical_lookback_months: 24
+  historical_may_cross_naics_vintage: false
+  regression_ridge_penalty: 1.0
+
 model:
   backend: 'numpyro'
   chains: 4
@@ -2304,6 +2312,9 @@ disclosure:
   exact_reconstruction_action: 'withhold'
   narrow_interval_action: 'manual_review'
   publish_label_required: true
+  # Configured by the governance owner (§21, "Disclosure thresholds"): policy, not evidence.
+  narrow_interval_absolute_width: 10
+  narrow_interval_relative_width: 0.25
 ```
 
 ---
