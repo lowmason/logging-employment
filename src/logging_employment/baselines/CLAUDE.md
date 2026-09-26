@@ -103,7 +103,7 @@ that regenerates the fixture.
 ## Commands (repo root)
 
 ```bash
-# 92 passed
+# 99 passed
 uv run pytest tests/unit/test_baseline_interfaces.py tests/unit/test_baselines_*.py
 # 20 passed with data/staged; 15 passed + 5 skipped without (the 5 are test_d1_baselines)
 uv run pytest tests/integration/test_baseline_golden.py \

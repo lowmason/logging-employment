@@ -312,3 +312,41 @@ The largest rise, +8.0117 on `whole_state_year_blocks` seed 4096 `equal_residual
 Plan 15 Task 10 replaced this span of the Stage 5 block, which treated `D-111` as pending:
 
 > **The §9.3 margins are a precondition of THIS stage, not Stage 6's.** Every one of the 1,227 suppressed state cells is `[0, +inf)` in the SHIPPED `deterministic_bounds` — `selected_upper` null on all 1,227 — because no parent-industry or ownership margin has ever entered the constraint system. This stage consumes `deterministic_bounds`, so the question is settled before it, by `specs/completed/stage5-gate-inputs.md` R-S5G-5. **MEASURED 2026-09-11: a margin EXISTS and the shipped identification set is therefore incomplete.** Of the 409 suppressed private state-quarters, **252 (61.6%, 756 of the 1,227 months) carry a disclosed private `113` parent**, which bounds `113310` above by nonnegativity of `1131` and `1132`; **0 are exactly reconstructed** — `1133` and `11331` are disclosed on 0 of 409 because the single-child chain is suppressed together, `own_code 0` does not exist at state x 6-digit (a measured absence, not an unfetched one), and no disclosed `113` parent on a suppressed quarter is a `'-'` true zero. No MEASURED margin therefore gives REQ-027/§14.4 a live instance (`D-110`) — but the `113 - 1131 - 1132` path was not measured, so on the 252 bounded quarters exactness is unknown rather than absent. The BOUND is not absorbed here: it needs a `registry/sources.yaml` row per new slice, new cell kinds and a `rows.size_margin_rows`-style parent-margin builder in `constraints/`, a §13.2 step-4 rule in `validate/recover.py` for when the parent stays visible under the synthetic pattern (it is public on 252 of 409 real suppressions, so hiding it always would score methods under harder identification than production — today that moves §13.5's bound metrics and `validation_scores`' `selected_*` columns, not WAPE, coverage or the scoreboard, since baselines never read masked bounds (`D-087`); step 6 labels any exact case), and it makes `D-093`'s MILP gap reachable for the bounded cells whose LP width falls below §9.6's threshold of 25 — `_needs_milp` needs a finite `upper` AND that width, which is why MILP has run on 0 of 4,775 rows. Routed to `specs/stage5-parent-margin.md`; **Stage 5 MUST NOT consume `deterministic_bounds` as identification-complete until that spec lands.** See `specs/findings/qcew-parent-margins.md`; `specs/findings/stage-5-log.md` carries the history.
+
+## 2026-09-26 — `D-113`: the comparand re-run under a calendar-month discount
+
+`5667d93` makes `share_exponentially_weighted` discount each share by its age in calendar months,
+counted back from the newest observation, instead of by its position in a list of disclosed months.
+`runs/4cf47a918dd8` was re-run at that commit with a clean tree -- `run-baselines`, `reconcile`, then
+`validate` (12 min 42 s) -- after the directory was copied to `runs/_pre_d113_4cf47a918dd8`. The run
+id did not move, since the change adds no config key. Every manifest the re-run wrote records
+`code_commit` `5667d93`, so this also brings the comparand up to date with `e937605`'s exactly
+rounded metric sums, which the 2026-09-13 run predated. Compared by join on each table's key, never
+by position:
+
+| artifact | rows, both sides | key-only | what moved |
+|---|---|---|---|
+| `baseline_results` | 12,270 | 0 | 501 rows, all `share_exponentially_weighted`: `raw_weight` on 120, `estimate` on 486, `estimate_integer` on 64 |
+| `validation_scores` | 12,530 | 0 | 214 rows, all `share_exponentially_weighted` |
+| `validation_metrics` | 6,932 | 0 | `value` on 238 exponential rows, 223 beyond rel 1e-12 (point 184, probabilistic 36, constraint 3), and on 351 rows of the other eight, by at most 1.3e-14 relative |
+| `validation_scoreboard` | 270 | 0 | `wape` on 19 exponential rows, and on 52 of the other eight by at most 4.1e-16 relative |
+
+**The attribution is clean.** No other estimator's estimate moved: every non-exponential row of
+`baseline_results` and `validation_scores` is identical. The other eight's metric and scoreboard
+movement is the last-ulp signature of `e937605`, which changed how the metrics sum, not what they
+sum. `raw_weight` moves on exactly 120 rows, the 120 gappy histories. `estimate` moves on 486
+because §12.2 renormalizes every cell of a month in which one own weight moved, and plan 15's §12.3
+scaling then clips the largest moves: 3.92% at most here, against 7.60% under allocation alone. The
+exponential variant's `weight_basis_counts` (327 own, 900 fallback) and its declines (none) are
+unchanged, as they must be, since a positively weighted mean of the same shares is positive exactly
+when the old one was. `max_residual_drift` stays 4.547e-13. The three constraint rows are
+`anchor_adding_up_max_abs` moving at machine precision.
+
+**§13.10's comparand is unchanged in 9 of 9 regimes, and so is the unrestricted best.**
+`structural_break` still names `share_exponentially_weighted`. Pooled across seeds, its WAPE went
+0.04015 -> 0.04009 against the runner-up `share_last_observed`'s unchanged 0.04019, so the margin
+that makes it the comparand widened from 0.00004 to 0.00010: a near tie either way. Its per-seed
+WAPE moved in both directions across regimes, by at most 3.96% (`regional_blocks` seed 4096,
+0.00580 -> 0.00557). The largest relative move anywhere is a division stratum, `naics_transition`
+seed 1024 `mountain`, 0.0160 -> 0.0737, where a few cells dominate the ratio. Two coverage values
+moved.
