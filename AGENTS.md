@@ -1,0 +1,191 @@
+# logging_employment
+
+Monthly state Logging (NAICS 113310, private ownership, states + DC, 2017-01..2024-12) employment
+by establishment size class, for the cells BLS suppresses for disclosure. Identification precedes
+imputation: sharp LP/MILP bounds from public accounting facts (§9), then transparent baselines
+(§10), exact reconciliation (§12), then a pseudo-suppression harness (§13). Sources are QCEW,
+QCEW-by-size and CBP. The §11 Bayesian model is not built yet.
+
+**The spec is authoritative and this codebase cites it constantly.**
+`specs/logging-employment-spec.md` — §3 estimand, §4 invariants (`INV-001`..`INV-016`), §6.2
+storage, §7 table field lists, §9 engine, §10 baselines, §12 reconciliation, §13 validation, §14
+disclosure, §16 interfaces, §18.3 fail-closed, Appendix A the reference config (≈ `config.yaml`).
+Stage status is at the end of that file under `### Stage stamps` — read it rather than assuming a
+stage is done; it also records what each stage re-validated about later ones. Plan queue:
+`specs/logging-employment-spec-roadmap.md`; open decisions: `specs/deferred_items.md`.
+
+## Commands
+
+```
+uv run pytest                    # whole suite; data-bound tests skip without data/ (gotchas)
+uv run ruff format src tests     # the single formatter; NEVER `ruff format .` (see gotchas)
+uv run ruff check src tests      # clean; a bare `.` also lints scripts/ (see gotchas)
+uv run interrogate src           # docstring gate, fail-under = 100
+
+logging-estimates validate-config --config config.yaml   # these two run in a bare checkout,
+logging-estimates registry verify --config config.yaml   # no data/ needed
+logging-estimates fetch --source qcew --config config.yaml   # or qcew_parent / qcew_size / cbp; network +
+                                                             # CENSUS_API_KEY from ./.env
+# then, in order:
+build-harmonized → build-constraints → solve-bounds → run-baselines → reconcile → validate
+```
+
+Every command takes `--config config.yaml` and must be idempotent for the same inputs (§16.1);
+each gates on the previous one's artifact and refuses with the missing path
+(`cli.py::{solve_bounds_command, run_baselines_command, reconcile_command}` — symbols, not line
+numbers, because plan 13 drifted the old `:250` / `:349` pins by inserting above them).
+**`run-baselines` gates on TWO** as of plan 13 (R-S5P-3): `schema_manifest.json` *and*
+`deterministic_bounds.parquet`, so `solve-bounds` is a hard precondition rather than an advisory
+step in the documented order — every estimate is checked against its §9 interval (INV-002's
+per-cell half) instead of the check being skipped when its input is absent. `validate --estimators a,b` scores a subset in its own run dir. `--help` is the real
+command list — five of §16.1's fifteen do not exist yet (`fit-state-model`, `fit-size-model`,
+`disclosure-review`, `publish`, `run-all`).
+
+Markers are declared but never applied by `addopts`: `slow` is on one unit test and FIVE
+integration modules (measured 2026-09-10: six `mark.slow` sites) and nothing excludes it locally (pass `-m "not slow"` yourself), and `network` is
+declared — its help text even says "excluded from the default run" — but no test carries it.
+
+**CI** (`.github/workflows/ci.yml`, added 2026-09-13) runs the four gates above on every push to
+`main` and every PR, after `uv sync --locked`, with `pytest -m "not slow and not network"`. It is
+the hermetic tier only: no runner has `data/`, so every data-bound test skips there by design, and
+a green check says nothing about the D1 integration tests — those still need a local run where
+`data/` lives. Measured 2026-09-13 without `data/`: the expression deselects 27 tests (the six
+`slow` sites are mostly module-level) and passed stays at 1408, so it removes nothing that would
+have run. Nothing else is deselected. Those counts are THIS MAC's: ubuntu-latest reports 1407
+passed, 46 skipped, 27 deselected (run 34765933053), because
+`tests/audit/test_qcew_codes.py::test_period_basis_quotes_the_reference_verbatim_where_the_reference_is_readable`
+skips where the personal `~/.Codex/skills/bls-data-context/` reference is absent (D-055).
+
+**Float goldens compare through `tests/golden_compare.py`, not `.equals`** (2026-09-13). The two
+float goldens (`test_validation_golden.py::test_the_metrics_match_the_golden`,
+`test_baseline_golden.py::test_the_baseline_output_matches_its_golden_fixture`) failed on
+ubuntu-latest (run 34763305304) against files written on an arm64 Mac, for two separate reasons.
+THREAD COUNT: polars returns a derived Series in one chunk per thread and rounds each chunk's sum,
+so `validate/metrics.py` now reduces through `math.fsum` (`_exact_sum`) and the re-pinned
+validation golden is byte-identical at `POLARS_MAX_THREADS` 1, 4 and 14. PLATFORM: OpenBLAS and
+glibc's libm against Accelerate and Apple's libm move `constrained_regression` (`x.T @ y`, `solve`,
+`exp`/`log`) and CRPS (`np.dot`) by up to 1.5e-14 relative (diagnostic run 34764717606), and no
+integer, count or coverage value moved. So the comparator checks every non-float column exactly and
+Float64 within rel 1e-12 / abs 1e-9. Never pin `POLARS_MAX_THREADS` to make a golden pass, and
+diff old against new by join before re-pinning one (§17.6).
+
+## Architecture
+
+`fetch` puts raw bytes in a content-addressed immutable store; every later stage reads only the
+five harmonized Parquet tables (`contracts.HarmonizedData`), never an endpoint. `build-constraints`
+turns those into a cell/row/coefficient system, `solve-bounds` bounds each component,
+`run-baselines` produces weights that `reconcile/` turns into estimates, `validate` re-runs it under
+synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per command.
+
+| Module | Owns |
+|---|---|
+| `cli.py` | the Typer app: subcommands, their preconditions, and the manifests they write |
+| `config.py` | pydantic v2 `Config`; every model subclasses `_Strict` (`extra="forbid"`), `.env` credentials, `resolved_dict` |
+| `contracts.py` | every persisted table's polars schema (§7), schema fingerprints, closed value sets |
+| `build.py` | `build-harmonized` + the deterministic Parquet writer; reads stored bytes, never fetches |
+| `fetching.py` | acquisition per source, `source_snapshot` rows, `runs/source_manifest.parquet` |
+| `store.py` | `data/raw/<source_id>/<sha256>/<file>`, written once; the secret guard |
+| `runs.py` | `runs/<run_id>/` and how the id is derived |
+| `errors.py` | the fail-closed exception hierarchy (§18.3) |
+| `classification.py`, `constants.py` | §3.1's memo read out of the spec file rather than retyped; the D1 window, `113310`, ownership `5`, states+DC FIPS, measured QCEW code sets |
+| `ingest/` | one module per source + the shared `HttpFetcher` → see `ingest/AGENTS.md` |
+| `harmonize/` | NAICS vintages, the nine versioned dimensions, §8.6 bridges, CBP regime-by-year, universe guards |
+| `constraints/` | §9 identification engine → see `constraints/AGENTS.md` |
+| `reconcile/` | §12 exact reconciliation → see `reconcile/AGENTS.md` |
+| `baselines/` | §10 transparent baselines → see `baselines/AGENTS.md` |
+| `validate/` | §13 pseudo-suppression harness → see `validate/AGENTS.md` |
+| `registry/` | §7.1 source registry: row model, `registry/sources.yaml`, `registry verify`'s checks |
+| `disclosure/` | §9.8 flags only — `exact_reconstruction_flag`, `narrow_feasible_interval_flag`, on suppressed cells only, thresholds from config |
+
+## Conventions that span modules
+
+- **Run ids are derived, not stamped.** `runs.run_id` = sha256 of `{config: resolved_dict(cfg),
+  inputs: {stem: sha256}}`, truncated to 12, over `data/staged/*.parquet` (`runs.py::run_id`,
+  `cli.py::_input_digests`); optional keys are *omitted*, never null, so they do not re-id existing runs. The
+  id therefore covers config + input data but **not source code** — which is why every JSON RUN
+  manifest also carries `code_commit` and `uv_lock_sha256` from `runs.code_provenance` (plan 13, R-S5P-5),
+  written through the single `cli.py::_write_manifest`. (`runs/source_manifest.parquet`
+  carries neither — `fetching.write_source_manifest` does not go through that writer.) Those sit BESIDE the id, never inside it:
+  hashing the commit in would rename every run directory on every commit. `code_provenance`
+  records, never raises — `"unknown"` when unanswerable — and marks a dirty tree `<sha>-dirty`,
+  because a bare sha from a dirty worktree is a false "this run matches that commit".
+- **Schemas are ordered `dict[str, pl.DataType]` literals in `contracts.py`, and the order is
+  load-bearing** — `schema_fingerprint` hashes the ordered pairs, so reordering fields is
+  a schema change. `validate_frame` matches names and dtypes exactly and checks no values;
+  `assert_declared_provenance` enforces the closed string sets (`WEIGHT_BASES`,
+  `DECLINE_KINDS`, `SUPPRESSION_TYPES`, ...) that a `pl.String` dtype cannot.
+- **Every Parquet write is byte-reproducible**: sorted to a total order, rechunked, uncompressed,
+  `statistics=False`, returning the file's sha256. `build.write_parquet_deterministic` is
+  the shared one — `build.deterministic_order` puts the natural key first and every
+  remaining column behind it as tiebreak, and is public so a golden test can order an in-memory
+  frame the same way. `fetching.write_source_manifest` repeats the write policy inline but
+  sorts on `["source_id", "snapshot_id"]` only.
+- **Fail closed with a named error.** Everything in `errors.py` subclasses `LoggingEmploymentError`
+  and carries the offending value. Some classes and guards are *deliberately unraised/uncalled* and
+  say so (`NoHarvestFactorError`, both guards in `harmonize/concepts.py`): later stages own them.
+- **Secrets never reach an artifact** (D3, §7.2): `store.assert_no_secret` refuses a
+  snapshot row containing one of `config.SECRET_ENV_VARS`, `fetching._without_credentials` strips
+  the `key` param before recording, and `resolved_dict` keeps only the env var's *name*.
+- **`cell_id` = `kind|state_fips|reference_month|ownership_code|industry_code|naics_vintage|
+  size_class`** (`constraints/cells.py::cell_id`); totals use `state_fips="US"`, `size_class="ALL"`.
+  `naics_vintage` sits inside the id, so a vintage change renames every cell.
+- **Vintage discipline**: `harmonize/naics.vintage_for_year` gives `NAICS 2022` from 2022, `NAICS
+  2017` before it, and *refuses* years < 2017 (`UnsupportedReferenceYearError`) rather than
+  mislabelling them. `INV-007` (never stack incompatible vintages) is enforced at four separate
+  points: `build.snapshot_paths` (the gotcha below), `constraints/cells.py::_assert_one_vintage_per_cell`,
+  `constraints/compat.py` (`:141`, `:154`, and `assert_parent_margin_compatible` since plan 15) and
+  `constraints/rows.py::constraint`.
+  None of them is a general guarantee — `constraints/AGENTS.md` says exactly what each covers.
+- **Docstrings are the design record.** Nearly every callable has one, and the house style is to
+  say *why this and not the obvious alternative*, citing §/`INV-`/`REQ-`/`SRC-` ids; move those
+  notes when refactoring rather than dropping them. Corollary: a note that reads as a measurement
+  ("measured 2026-09-05: 1,227 cells") is a dated witness — re-verify before repeating it.
+- Committed fixtures live in `tests/fixtures/` and golden tests read them, never `data/`;
+  `tests/unit/conftest.py` has frame factories that fill every schema column.
+
+## Gotchas
+
+- **`data/` (~564 MB) and `runs/` are gitignored, but the suite IS green without them** — as of
+  plan 13 (R-S5P-2). Measured at `4cc0dfe`: `uv run pytest` is **1388 passed** with `data/` and
+  **1318 passed, 70 skipped, 0 failed** without it. The arithmetic is the check worth repeating:
+  `1318 + 70 == 1388`, so a dataless run skips exactly the data-bound tests and loses no coverage.
+  *Superseded reading, so a stale citation is recognisable:* until plan 13 this said "the suite is
+  not green without them — 42 failed, 1238 passed, 26 skipped at `8899b5f`", and the 42 were
+  `validate/` tests calling `HarmonizedData.load(Path("data/staged"))` with no skip guard.
+  `tests/conftest.py` now owns `STAGED` (**absolute**, so the old cwd-relative requirement to run
+  pytest from the repo root is gone) and `requires_staged`, a skipif keyed on
+  `qcew_monthly.parquet` existing, and it is the suite's only copy of that predicate since `D-088`
+  folded in the last five inline guards (2026-09-12). Ten modules take a module-level `pytestmark`;
+  four MIXED modules take per-test decorators, because a blanket mark there would convert tests
+  that pass in a bare checkout into skips while still reporting "0 failed". **If you add a
+  data-bound test, guard it and re-check by arithmetic — skipped must rise by exactly the number
+  you added and passed must not fall.**
+- **`ruff` is the only formatter, and its SCOPE is the gotcha.** Black was dropped 2026-09-09
+  (plan 12's Task 0): the two disagreed on eight files — ruff >=0.9 rewrites `assert (x), msg`
+  into `assert x, (msg)` and black leaves it — and `pyproject.toml` declared both, so "is the tree
+  formatted?" depended on which command you ran. Format `src tests`, **never `ruff format .`**:
+  measured, it rewrites `except (A, B):` into PEP 758's `except A, B:` in two `scripts/audit/`
+  files (`forest_sources.py`, `qcew_routes.py`) whose PEP 723 headers declare `>=3.12`, where that
+  syntax does not parse. The reason now
+  lives beside `[tool.ruff]`. Lint is scope-dependent the same way: `ruff check src tests` is
+  **clean**, while `ruff check .` reports 24 findings (ISC004, TRY004, UP037, RUF100, RET501,
+  UP047) that all live in `scripts/`. `interrogate src` is `fail-under = 100` and now **passes at
+  100%** — the four long-standing misses got docstrings in that same commit, so a failure there is
+  yours.
+- **Adding a pydantic field to `Config` re-ids every run directory UNLESS it is excluded from the
+  dump**: `resolved_dict` is `model_dump(mode="json")` and feeds `run_id`. Plan 13 added seven
+  fields to `SourcesConfig` and moved no id, because each is `Field(default=None, exclude=True)`
+  and so reaches no dump — that is the second remedy, for a key nothing outside `config.py` reads. For a CLI-only choice use `run_id`'s `overrides`,
+  omitting the key when unset (`runs.py` docstring), so existing runs keep their id.
+- **A run directory can be stale w.r.t. your code.** `run_id` ignores source, so editing an
+  estimator and re-running overwrites the same `runs/<id>/`. The one cross-stage check that does
+  fire is `constraint_set_hash` (see `constraints/AGENTS.md`).
+- **CBP responses are not byte-reproducible** — set-identical rows in a different order, so each
+  re-fetch stores another object for the same year. `build.snapshot_paths` raises
+  `AmbiguousSnapshotError` (`build.py::snapshot_paths`) rather than stacking two snapshots of one key; pass the
+  run manifest.
+- **Government APIs answer 200 with an error body.** `ingest/base.HttpFetcher` returns
+  non-200 responses instead of raising, exactly so the caller classifies on content, not status.
+- **`scripts/audit/` is destructive-first.** Standalone PEP 723 files (`uv run --no-project`),
+  tested by `tests/audit/`. `cbp_metadata.py` `rmtree`s each year's extract directory *before* it
+  probes, and those extracts are gitignored — never run it just to check a change.
