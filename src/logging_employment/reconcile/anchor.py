@@ -46,7 +46,7 @@ from dataclasses import dataclass
 
 import polars as pl
 
-from ..contracts import ANCHOR_AUDIT_SCHEMA
+from ..contracts import ANCHOR_AUDIT_SCHEMA, ANCHOR_BASES
 from ..errors import ConceptViolationError, UniverseClosureError
 
 DISCLOSED_STATUSES: tuple[str, ...] = ("observed", "true_zero")
@@ -75,6 +75,22 @@ class Anchor:
     residual: float
     missing_cells: tuple[str, ...]
     anchor_basis: str
+
+    def __post_init__(self) -> None:
+        """Refuse an `anchor_basis` outside `contracts.ANCHOR_BASES` (D-122).
+
+        Refused HERE, once, when the anchor is built. `assert_declared_provenance` refuses the same
+        defect on any frame carrying the column, but it sees only frames: Stage 5's
+        `reconcile_draws` takes the `Anchor` itself, and §7.11's `posterior_summary` has no
+        `anchor_basis` column, so on that path an undeclared basis would meet no guard at all.
+        `scaling.Bounds.__post_init__` (D-096) makes the same choice for an inverted bound.
+        """
+        if self.anchor_basis not in ANCHOR_BASES:
+            raise ConceptViolationError(
+                f"{self.reference_month}: anchor_basis {self.anchor_basis!r} is undeclared; the "
+                f"declared set is {list(ANCHOR_BASES)}. The basis records what licensed the "
+                "allocation target (§12.2), so an undeclared one is provenance nothing granted."
+            )
 
 
 def observed_partition(monthly: pl.DataFrame) -> dict[str, Partition]:

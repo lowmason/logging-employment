@@ -63,6 +63,10 @@ The load-bearing points:
   partition without mutating `qcew_monthly`. Pinned by `tests/unit/test_anchor.py::test_national_residual_never_reads_observation_status`.
   `observed_partition` is only the default builder; `true_zero` belongs in `disclosed` (a published
   value), not `missing`.
+- **An `Anchor` checks its own basis.** `Anchor.__post_init__` refuses an `anchor_basis` outside
+  `contracts.ANCHOR_BASES` with `ConceptViolationError` (`D-122`). The frame guard
+  `assert_declared_provenance` cannot cover it: `reconcile_draws` takes the `Anchor` itself, and
+  §7.11's `posterior_summary` carries no `anchor_basis` column.
 - **`closure_audit` iterates the months in `monthly`, not the keys of `partitions`**
   (`anchor.py::closure_audit`-171`). A month with a national row and no state rows — the shape a truncated
   ingest produces — would otherwise be skipped in silence.

@@ -2401,7 +2401,7 @@ that the amended §12.2 requires and no code runs.
       load once it is popped; it was red against the unamended fence on exactly the three `missing`
       keys. `_appendix_a_made_loadable` only pops `model`. Updated to match: the test constant's
       header, now four differences from five, and `config.SourcesConfig`'s docstring.
-- [ ] `D-122` **An `Anchor` is built without checking `anchor_basis` against `ANCHOR_BASES`, and Stage 5's draws path checks it nowhere else.**
+- [x] `D-122` **An `Anchor` is built without checking `anchor_basis` against `ANCHOR_BASES`, and Stage 5's draws path checks it nowhere else.**
       R-04 (`docs/reviews/2026-09-09-system-review.md`) asked for `Anchor.anchor_basis` to be "validated
       against `ANCHOR_BASES` at construction (one `if` + one test)". `reconcile/anchor.py::Anchor` is a
       frozen dataclass with `anchor_basis: str` and no `__post_init__`, so any string builds one. `D-043`
@@ -2418,6 +2418,13 @@ that the amended §12.2 requires and no code runs.
       `Anchor` whose `anchor_basis` is outside `contracts.ANCHOR_BASES` raises `ConceptViolationError`
       carrying the value, the error `assert_declared_provenance` raises for the same defect on a frame,
       and a test in `tests/unit/test_anchor.py` pins it.
+      **→ done 2026-09-26 (/deferred quick fix).** `Anchor.__post_init__` refuses a basis outside
+      `contracts.ANCHOR_BASES` with `ConceptViolationError`, whose message carries the month, the value
+      and the declared set. `tests/unit/test_anchor.py::test_an_anchor_with_an_undeclared_basis_is_refused_when_built`
+      failed first (`DID NOT RAISE`) on `declared_national_totals`, a one-letter typo, and passes now.
+      `test_every_declared_basis_builds_an_anchor` pins that all three declared values still build.
+      Every test that builds an `Anchor` directly already passed `declared_national_total`, so none
+      moved. `reconcile/CLAUDE.md` records the contract.
 - [ ] `D-123` **A month with no suppressed state cell never tests the identity §12.2's retirement condition requires.**
       Since `D-120`, spec §12.2 says that when a QCEW vintage yields a month with no suppressed state
       cell, `SRC-QCEW-006` becomes testable there: "$|R_t|$ MUST be checked against tolerance there, a

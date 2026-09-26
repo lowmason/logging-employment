@@ -5,8 +5,10 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
+from logging_employment.contracts import ANCHOR_BASES
 from logging_employment.errors import ConceptViolationError, UniverseClosureError
 from logging_employment.reconcile.anchor import (
+    Anchor,
     Partition,
     assert_universe_closes,
     closure_audit,
@@ -375,3 +377,29 @@ def test_a_partition_from_another_month_is_refused(make_monthly) -> None:
     straddling = Partition(disclosed=both_months, missing=both_months.head(0))
     with pytest.raises(ConceptViolationError, match="2024-04"):
         national_residual(monthly, straddling, reference_month="2024-03")
+
+
+def test_an_anchor_with_an_undeclared_basis_is_refused_when_built() -> None:
+    """D-122: the basis is checked when the `Anchor` is built, not only when a frame is written.
+
+    `contracts.assert_declared_provenance` refuses an undeclared `anchor_basis` on any frame that
+    carries the column. Stage 5's draws path never writes one: `reconcile_draws` takes the `Anchor`
+    itself, and §7.11's `posterior_summary` has no `anchor_basis` column. A typo is the realistic
+    failure, so the refused value is one letter away from the declared one.
+    """
+    with pytest.raises(ConceptViolationError, match="declared_national_totals"):
+        Anchor(
+            reference_month="2024-03",
+            residual=40.0,
+            missing_cells=("01",),
+            anchor_basis="declared_national_totals",
+        )
+
+
+@pytest.mark.parametrize("basis", ANCHOR_BASES)
+def test_every_declared_basis_builds_an_anchor(basis: str) -> None:
+    """The refusal is the declared set's complement, not a pin on the one value reachable today."""
+    anchor = Anchor(
+        reference_month="2024-03", residual=40.0, missing_cells=("01",), anchor_basis=basis
+    )
+    assert anchor.anchor_basis == basis
