@@ -173,14 +173,16 @@ def test_a_nonzero_establishment_gap_halts_the_run(make_monthly) -> None:
 def test_the_gate_is_evaluated_for_every_month_not_only_failing_ones(make_monthly) -> None:
     """The audit is a diffable artifact: every month appears, passing or not.
 
-    `anchored` IS the gap being zero (anchor.py: `establishment_gap == 0 and residual >= 0`), and
-    asserting it here is safe because the frame below is synthetic -- the gap is fixture-designed,
-    not measured, and no BLS revision can move it. The anti-drift rule binds assertions on live
-    data; see `tests/integration/test_d1_baselines.py` for the same claim made structurally.
+    `anchored` is the gate's verdict on each month (D-124), and asserting it here is safe because
+    the frame below is synthetic -- the gap is fixture-designed, not measured, and no BLS revision
+    can move it. The anti-drift rule binds assertions on live data; see
+    `tests/integration/test_d1_baselines.py` for the same claim made structurally.
 
     2024-03 closes and 2024-04 does not, so `anchored` is asserted as the fixture's own designed
     pattern -- the evidence that a failing month survives into the artifact rather than
-    disappearing before `assert_universe_closes` sees it.
+    disappearing before `assert_universe_closes` sees it. Each month carries a suppressed state 04.
+    Without it the month is fully disclosed and its residual of 40 fails D-123's identity check, so
+    2024-03 would not pass and 2024-04 would fail on more than its gap.
     """
     monthly = make_monthly(
         {
@@ -190,7 +192,7 @@ def test_the_gate_is_evaluated_for_every_month_not_only_failing_ones(make_monthl
             "aggregation_level": "18",
             "reference_month": "2024-03",
             "employment_value": 100,
-            "qtrly_establishments": 6,
+            "qtrly_establishments": 10,
         },
         {
             "state_fips": "01",
@@ -198,6 +200,14 @@ def test_the_gate_is_evaluated_for_every_month_not_only_failing_ones(make_monthl
             "reference_month": "2024-03",
             "employment_value": 60,
             "qtrly_establishments": 6,
+        },
+        {
+            "state_fips": "04",
+            "area_fips": "04000",
+            "reference_month": "2024-03",
+            "employment_value": None,
+            "qtrly_establishments": 4,
+            "observation_status": "suppressed",
         },
         {
             "area_type": "national",
@@ -208,7 +218,7 @@ def test_the_gate_is_evaluated_for_every_month_not_only_failing_ones(make_monthl
             "employment_value": 90,
             # One establishment the state table does not carry: the gate must fail this month,
             # and employment is left alone so `residual >= 0` and the gap is the only cause.
-            "qtrly_establishments": 7,
+            "qtrly_establishments": 11,
         },
         {
             "state_fips": "01",
@@ -217,11 +227,20 @@ def test_the_gate_is_evaluated_for_every_month_not_only_failing_ones(make_monthl
             "employment_value": 50,
             "qtrly_establishments": 6,
         },
+        {
+            "state_fips": "04",
+            "area_fips": "04000",
+            "reference_month": "2024-04",
+            "employment_value": None,
+            "qtrly_establishments": 4,
+            "observation_status": "suppressed",
+        },
     )
     audit = closure_audit(monthly, observed_partition(monthly))
     assert audit.height == 2
     assert set(audit.columns) >= {"establishment_gap", "publishing_area_count", "anchored"}
     assert audit["reference_month"].to_list() == ["2024-03", "2024-04"]
+    assert audit["missing_set_size"].to_list() == [1, 1]
     assert audit["anchored"].to_list() == [True, False]
 
 
@@ -289,6 +308,85 @@ def test_a_fully_disclosed_month_whose_identity_holds_passes_the_gate(make_month
     """The pass half raises nothing: the gate refuses a miss, not every fully disclosed month."""
     monthly = _one_fully_disclosed_month(make_monthly, national_employment=60)
     assert_universe_closes(closure_audit(monthly, observed_partition(monthly)))
+
+
+def _a_gated_month(
+    make_monthly, *, national_employment: int, national_establishments: int, suppressed: bool
+) -> pl.DataFrame:
+    """One month: observed state 01 (60 employees, 6 establishments) and, if asked, suppressed 04.
+
+    State 04 carries 4 establishments, so the universes close at a national count of 10 with it and
+    of 6 without it.
+    """
+    rows: list[dict[str, object]] = [
+        {
+            "area_type": "national",
+            "area_fips": "US000",
+            "state_fips": None,
+            "aggregation_level": "18",
+            "employment_value": national_employment,
+            "qtrly_establishments": national_establishments,
+        },
+        {
+            "state_fips": "01",
+            "area_fips": "01000",
+            "employment_value": 60,
+            "qtrly_establishments": 6,
+            "observation_status": "observed",
+        },
+    ]
+    if suppressed:
+        rows.append(
+            {
+                "state_fips": "04",
+                "area_fips": "04000",
+                "employment_value": None,
+                "qtrly_establishments": 4,
+                "observation_status": "suppressed",
+            }
+        )
+    return make_monthly(*rows)
+
+
+@pytest.mark.parametrize(
+    ("national_employment", "national_establishments", "suppressed", "refusal"),
+    [
+        pytest.param(100, 10, True, None, id="passes-with-a-missing-cell"),
+        pytest.param(100, 11, True, "do not close", id="establishment-gap"),
+        pytest.param(50, 10, True, "is negative", id="negative-residual"),
+        pytest.param(61, 6, False, "nowhere to go", id="identity-miss"),
+        pytest.param(60, 6, False, None, id="identity-holds"),
+    ],
+)
+def test_anchored_is_false_on_exactly_the_months_the_gate_refuses(
+    make_monthly,
+    national_employment: int,
+    national_establishments: int,
+    suppressed: bool,
+    refusal: str | None,
+) -> None:
+    """D-124: `anchored` is the gate's verdict on the month, so the two must not disagree.
+
+    `closure_audit` writes the gate's refusals out a second time rather than sharing them with
+    `assert_universe_closes`, and D-123 added its third refusal to the gate alone: a fully disclosed
+    month with a positive residual halted the run while its audit row read `anchored = true`. Each
+    case names the refusal it expects and asserts it before the column, so a fixture slip cannot turn
+    one shape into another, or a refusal into a pass the column then agrees with. The five cases pin
+    these shapes, not the gate's future checks: a new refusal needs its own case here.
+    """
+    monthly = _a_gated_month(
+        make_monthly,
+        national_employment=national_employment,
+        national_establishments=national_establishments,
+        suppressed=suppressed,
+    )
+    audit = closure_audit(monthly, observed_partition(monthly))
+    if refusal is None:
+        assert_universe_closes(audit)
+    else:
+        with pytest.raises(UniverseClosureError, match=refusal):
+            assert_universe_closes(audit)
+    assert audit["anchored"].item() == (refusal is None)
 
 
 def test_a_national_month_with_no_state_rows_is_still_gated(make_monthly) -> None:

@@ -2469,7 +2469,7 @@ Filed from Codex's re-review of PR #34 at its last head, `ccd41a2` (comment `411
 before the merge and was not addressed in that PR. `D-124` is the finding: a line `D-123` should have
 changed and did not. `D-125` is an older promise the finding leans on, that a refused run keeps its audit.
 
-- [ ] `D-124` **`closure_audit` marks a month `anchored` that `D-123`'s check refuses.**
+- [x] `D-124` **`closure_audit` marks a month `anchored` that `D-123`'s check refuses.**
       `reconcile/anchor.py::closure_audit` sets `anchored` to `establishment_gap == 0 and residual >= 0`:
       the gate's first two refusals, written out a second time rather than shared with
       `assert_universe_closes`. `D-123` added a third refusal to the gate, a month whose missing set is
@@ -2491,6 +2491,24 @@ changed and did not. `D-125` is an older promise the finding leans on, that a re
       `test_the_gate_is_evaluated_for_every_month_not_only_failing_ones` still shows one passing and one
       refused month, by giving each month a suppressed state rather than by flipping its expected
       `[True, False]`, with a docstring that no longer quotes the old expression.
+      **→ done 2026-09-26 (/deferred quick fix).** `closure_audit` sets `anchored` from all three of
+      the gate's refusals: a gap, a negative residual, and a nonzero residual with an empty missing
+      set. `tests/unit/test_anchor.py::test_anchored_is_false_on_exactly_the_months_the_gate_refuses`
+      runs five one-month shapes, three the gate refuses and two it passes. Each names the refusal it
+      expects, matched on the gate's message, before asserting that `anchored` agrees. It failed first
+      on the identity miss alone, where the gate refused "nowhere to go" and `anchored` read true, and
+      passes now. It pins those five shapes, not the gate's future checks: a new refusal needs its own
+      case. The fix then turned `test_the_gate_is_evaluated_for_every_month_not_only_failing_ones` red
+      (`[False, False]` against `[True, False]`), confirming it had pinned the defect. Each of its
+      months now carries a suppressed state, asserted as `missing_set_size == [1, 1]`, so 2024-03
+      passes the gate and 2024-04 fails on its gap alone, as its comment says. The suite went from 1565
+      to 1570 passed with `data/` present, the five new cases and nothing else. On D1 the column cannot
+      move and did not: rebuilt from `data/staged` as `run_baselines` builds it, 96 of 96 months read
+      `anchored` under both definitions, none has an empty missing set, and the smallest holds 9 cells.
+      The anchor-audit golden did not move either, since it runs through the gate. Updated to match:
+      the line's comment, that test's docstring and `reconcile/CLAUDE.md`, whose recorded count for
+      the eight reconcile unit files still read 82 from 2026-09-09; it was 91 before this fix and is
+      96 after.
 - [ ] `D-125` **The anchor audit says a refused run keeps it, and no refused run writes it.**
       `reconcile/anchor.py::closure_audit`'s docstring says the audit "is written whether or not the gate
       passes, so a failing run leaves the evidence that explains it rather than only an exception", and
