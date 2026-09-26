@@ -50,7 +50,11 @@ The load-bearing points:
   counts) must be exactly 0. `assert_universe_closes` (`anchor.py::assert_universe_closes`) halts the **whole run**, not
   one month, and also refuses any negative residual. Its one employment test is a month with no
   suppressed state cell, where §12.2's identity is testable: a nonzero residual there halts the run
-  too (`D-123`). No D1 month has an empty missing set, so on D1 it never fires.
+  too (`D-123`). No D1 month has an empty missing set, so on D1 it never fires. `closure_audit`'s
+  `anchored` column is the same verdict month by month, written out a second time rather than
+  shared, so a refusal added to the gate must be added there too;
+  `tests/unit/test_anchor.py::test_anchored_is_false_on_exactly_the_months_the_gate_refuses` pins one
+  case per shape (`D-124`).
 - `SRC-QCEW-006` came back `decline` (the argument is in `constraints/CLAUDE.md`), so no national
   employment margin may ever become a constraint row. The anchor is `anchor_basis =
   'declared_national_total'`, a `modeling_assumption` under INV-004/INV-005. The implied ceiling
@@ -140,7 +144,7 @@ sites — read it before citing or copying one.
 uv run pytest tests/unit/test_allocate.py tests/unit/test_anchor.py tests/unit/test_scaling.py \
   tests/unit/test_projection.py tests/unit/test_matrix.py tests/unit/test_integerize.py \
   tests/unit/test_reconcile_draws.py tests/unit/test_reconcile_properties.py
-# 82 passed in 0.21s. Every reconcile unit test is pure — no `data/`, no network.
+# 96 passed in 0.26s (measured 2026-09-26). Every reconcile unit test is pure — no `data/`, no network.
 
 logging-estimates run-baselines --config config.yaml   # the only production path; needs data/
 logging-estimates reconcile --config config.yaml       # drift verifier; does NOT call this package

@@ -2462,3 +2462,72 @@ that the amended §12.2 requires and no code runs.
       Codex review on PR #34 read as the configured `reconciliation.tolerance`. That tolerance bounds
       float drift in reconciled estimates, not a difference of published counts. §12.2 now says
       `R_t` MUST be exactly zero there, matching the code; the quote above is the text as filed.
+
+## PR #34 Codex re-review — 2026-09-26
+
+Filed from Codex's re-review of PR #34 at its last head, `ccd41a2` (comment `4112608908`), which arrived
+before the merge and was not addressed in that PR. `D-124` is the finding: a line `D-123` should have
+changed and did not. `D-125` is an older promise the finding leans on, that a refused run keeps its audit.
+
+- [x] `D-124` **`closure_audit` marks a month `anchored` that `D-123`'s check refuses.**
+      `reconcile/anchor.py::closure_audit` sets `anchored` to `establishment_gap == 0 and residual >= 0`:
+      the gate's first two refusals, written out a second time rather than shared with
+      `assert_universe_closes`. `D-123` added a third refusal to the gate, a month whose missing set is
+      empty and whose residual is not 0, and not to this line. So a fully disclosed month with a positive
+      residual halts the run while its audit row reads `anchored = true`; with a negative residual the
+      row already reads `false`, because `residual >= 0` fails. `contracts.ANCHOR_AUDIT_SCHEMA` calls the
+      audit "every number the admission gate looked at, recorded whether it passed or not", and
+      `anchored` is its one verdict column. One test pins the wrong value:
+      `tests/unit/test_anchor.py::test_the_gate_is_evaluated_for_every_month_not_only_failing_ones`
+      builds 2024-03 from one observed state, so that month is fully disclosed with a residual of 40,
+      and asserts it `anchored`. The column's one production reader, `cli.py::run_baselines_command`,
+      writes its sum into `baseline_manifest.json` as `months_anchored`. Latent on D1, where no month has
+      an empty missing set (`D-123`). And since a refused run writes no audit (`D-125`), the wrong value
+      shows today only in a frame from calling `closure_audit` directly, which is how
+      `reconcile/CLAUDE.md` says to diagnose a refusal. Not this item: `D-123`'s pass half, what a passing
+      fully disclosed month should license.
+      Size: quick-fix. Done when: `anchored` is false on exactly the months `assert_universe_closes`
+      refuses, pinned by one test over the gate's three refusal shapes and its two passing shapes; and
+      `test_the_gate_is_evaluated_for_every_month_not_only_failing_ones` still shows one passing and one
+      refused month, by giving each month a suppressed state rather than by flipping its expected
+      `[True, False]`, with a docstring that no longer quotes the old expression.
+      **→ done 2026-09-26 (/deferred quick fix).** `closure_audit` sets `anchored` from all three of
+      the gate's refusals: a gap, a negative residual, and a nonzero residual with an empty missing
+      set. `tests/unit/test_anchor.py::test_anchored_is_false_on_exactly_the_months_the_gate_refuses`
+      runs five one-month shapes, three the gate refuses and two it passes. Each names the refusal it
+      expects, matched on the gate's message, before asserting that `anchored` agrees. It failed first
+      on the identity miss alone, where the gate refused "nowhere to go" and `anchored` read true, and
+      passes now. It pins those five shapes, not the gate's future checks: a new refusal needs its own
+      case. The fix then turned `test_the_gate_is_evaluated_for_every_month_not_only_failing_ones` red
+      (`[False, False]` against `[True, False]`), confirming it had pinned the defect. Each of its
+      months now carries a suppressed state, asserted as `missing_set_size == [1, 1]`, so 2024-03
+      passes the gate and 2024-04 fails on its gap alone, as its comment says. The suite went from 1565
+      to 1570 passed with `data/` present, the five new cases and nothing else. On D1 the column cannot
+      move and did not: rebuilt from `data/staged` as `run_baselines` builds it, 96 of 96 months read
+      `anchored` under both definitions, none has an empty missing set, and the smallest holds 9 cells.
+      The anchor-audit golden did not move either, since it runs through the gate. Updated to match:
+      the line's comment, that test's docstring and `reconcile/CLAUDE.md`, whose recorded count for
+      the eight reconcile unit files still read 82 from 2026-09-09; it was 91 before this fix and is
+      96 after.
+- [ ] `D-125` **The anchor audit says a refused run keeps it, and no refused run writes it.**
+      `reconcile/anchor.py::closure_audit`'s docstring says the audit "is written whether or not the gate
+      passes, so a failing run leaves the evidence that explains it rather than only an exception", and
+      `contracts.ANCHOR_AUDIT_SCHEMA`'s comment says it is "recorded whether it passed or not". A refused
+      run records nothing. `baselines/runner.py::run_baselines` builds the frame and calls
+      `assert_universe_closes` on the next line, so a refusal raises out of `run_baselines`, and the only
+      write, `write_parquet_deterministic(audit, out / "anchor_audit.parquet")` in
+      `cli.py::run_baselines_command`, runs after `run_baselines` returns. A refused run leaves the
+      `UniverseClosureError` message, which is what `reconcile/CLAUDE.md` describes. The Stage 3 plan
+      audit flagged the same docstring before that stage ran, for another break
+      (`specs/findings/stage3-plan-audit.md:183`): `_national_row` raises `UniverseClosureError`, the
+      gate's own class, inside `closure_audit`'s loop, so a month with no national row yields no frame
+      at all. That finding was a nit, and the unregistered-work audit of 2026-09-07 reconciled only the
+      plan audit's non-nit findings, so neither break had an owner. The open decision is which way to
+      make the two texts true. Persisting a refused run's audit means the CLI needs the frame from a call
+      that raised, carried on the error for instance, and a refused run's directory then holds an
+      artifact from a run that did not finish. Narrowing the texts means saying the audit is computed on
+      every run and written only on a pass. `D-124` comes first either way: until it lands, a persisted
+      refused audit would record an identity-miss month as `anchored = true`.
+      Size: design. Done when: either a refused `run-baselines` leaves an `anchor_audit.parquet` holding
+      the refused month, with a test that makes the gate refuse and reads the file back, or both texts
+      say the audit is written only on a pass; and the `_national_row` break is settled the same way.

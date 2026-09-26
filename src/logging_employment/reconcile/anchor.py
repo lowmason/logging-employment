@@ -208,7 +208,15 @@ def closure_audit(monthly: pl.DataFrame, partitions: Mapping[str, Partition]) ->
                 "disclosed_count": part.disclosed.height,
                 "residual": residual,
                 "missing_set_size": missing_n,
-                "anchored": national_est - state_est == 0 and residual >= 0,
+                # The gate's verdict on the month: false on exactly what `assert_universe_closes`
+                # refuses, which is a gap, a negative residual, or a residual with no missing cell
+                # to receive it (D-123). Written out rather than shared with the gate, so a refusal
+                # added there must be added here too (D-124).
+                "anchored": (
+                    national_est - state_est == 0
+                    and residual >= 0
+                    and (missing_n > 0 or residual == 0)
+                ),
                 # A falsification band, not an accuracy score: implied employees per establishment
                 # across the missing set. It is EXPECTED to sit below the disclosed states'
                 # intensity, because suppression tracks small, less employment-dense states --
