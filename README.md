@@ -1,4 +1,4 @@
-# impute-suppressed-stats
+# logging-employment
 
 Monthly state Logging (NAICS 113310) employment by establishment
 size class, with deterministic bounds on the suppressed cells.

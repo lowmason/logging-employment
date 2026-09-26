@@ -3146,7 +3146,7 @@ _Extracts: 5; summary `generated_utc` 2026-09-05T00:20:03+00:00._
 ```json
 {
   "reason": null,
-  "route": "derived from qcew_panel (/Users/lowell/Projects/impute-suppressed-stats/data/raw/audit/qcew_panel/panel.parquet)",
+  "route": "derived from qcew_panel (/Users/lowell/Projects/logging-employment/data/raw/audit/qcew_panel/panel.parquet)",
   "status": "verified"
 }
 ```

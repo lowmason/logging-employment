@@ -327,7 +327,7 @@ git commit -m "test: skip the staged-data tests when data/staged is absent"
 
 - [x] **Step 1: Write the failing test**
 
-Added to /Users/lowell/Projects/impute-suppressed-stats/.claude/worktrees/wf_c524c67f-109-4/tests/unit/test_config.py (new imports: `re`, `typing.Any`, `yaml`, `logging_employment.config.Config`, `logging_employment.runs.run_id`; new module constants `REPO_ROOT`, `SPEC`, `INACTIVE_SOURCES`). Exact verified source:
+Added to /Users/lowell/Projects/logging-employment/.claude/worktrees/wf_c524c67f-109-4/tests/unit/test_config.py (new imports: `re`, `typing.Any`, `yaml`, `logging_employment.config.Config`, `logging_employment.runs.run_id`; new module constants `REPO_ROOT`, `SPEC`, `INACTIVE_SOURCES`). Exact verified source:
 
 ```python
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -495,7 +495,7 @@ Expected: FAIL — 11 errors reported where 4 were asserted.
 
 - [x] **Step 3: Implement**
 
-Exact verified diff of /Users/lowell/Projects/impute-suppressed-stats/.claude/worktrees/wf_c524c67f-109-4/src/logging_employment/config.py:
+Exact verified diff of /Users/lowell/Projects/logging-employment/.claude/worktrees/wf_c524c67f-109-4/src/logging_employment/config.py:
 
 ```diff
 @@ -9,7 +9,7 @@ from typing import Literal
@@ -1182,7 +1182,7 @@ COST OF (3), measured, not estimated:
 ```bash
 uv run pytest tests/unit/test_baselines_bounds.py tests/integration/test_baseline_cli.py -v -p no:randomly
 
-(run from /Users/lowell/Projects/impute-suppressed-stats/.claude/worktrees/wf_c524c67f-109-2)
+(run from /Users/lowell/Projects/logging-employment/.claude/worktrees/wf_c524c67f-109-2)
 ```
 Expected: PASS. The tamper test runs the real CLI, halves one `selected_upper` in the run dir's `deterministic_bounds.parquet` below an estimate that cell already received, and asserts the next invocation raises `BoundViolationError` naming that `cell_id`. It needs no `data/` — `tests/integration/conftest.py::staged_repo` builds a tmp repo from committed fixtures.
 

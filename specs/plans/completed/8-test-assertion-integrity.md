@@ -114,7 +114,7 @@ that writes both to disk and stages only the `.py` leaves that test red with eve
 
 #### Preconditions
 
-- Run from the repo root, `/Users/lowell/Projects/impute-suppressed-stats`.
+- Run from the repo root, `/Users/lowell/Projects/logging-employment`.
 - `data/staged/` present, i.e. `logging-estimates build-harmonized` has been run. The four staged
   tables this reads are `qcew_national_size.parquet`, `qcew_monthly.parquet`,
   `cbp_state_size.parquet`, `bridge.parquet`.
@@ -217,7 +217,7 @@ $ diff /tmp/sizegolden_final/make_fixture.py /tmp/sizegolden_final/make_fixture_
 ---
 > DST = Path("/tmp/final/fixture")
 
-$ cd /Users/lowell/Projects/impute-suppressed-stats && uv run python /tmp/sizegolden_final/make_fixture_tmp.py
+$ cd /Users/lowell/Projects/logging-employment && uv run python /tmp/sizegolden_final/make_fixture_tmp.py
 bridge.parquet                    0 rows     935 B
 cbp_state_size.parquet            0 rows    1866 B
 qcew_monthly.parquet            401 rows   30306 B
@@ -1857,7 +1857,7 @@ $ python3 -c "... apply ah.HUNKS[:5] only ..."   # -> /tmp/final/work/half_appli
 wrote half_applied.py (H1-H5 only, H6 and H7 NOT applied)
 $ uv run ruff check /tmp/final/work/half_applied.py
 All checks passed!
-$ cd /Users/lowell/Projects/impute-suppressed-stats && uv run ruff check --select F811 /tmp/final/work/half_applied.py
+$ cd /Users/lowell/Projects/logging-employment && uv run ruff check --select F811 /tmp/final/work/half_applied.py
 All checks passed!
 $ cd /tmp/final/work/clone && uv run black --check tests/audit/test_ces_levels.py   # half-applied file copied in
 All done! ✨ 🍰 ✨

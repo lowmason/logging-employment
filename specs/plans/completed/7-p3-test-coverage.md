@@ -243,7 +243,7 @@ would be a **false sentence in a tracked deliverable**: it promotes a territory 
 
 ```bash
 rm -rf /tmp/p3t1 && mkdir -p /tmp/p3t1
-cp /Users/lowell/Projects/impute-suppressed-stats/scripts/audit/ces_levels.py /tmp/p3t1/
+cp /Users/lowell/Projects/logging-employment/scripts/audit/ces_levels.py /tmp/p3t1/
 python3 -c "
 import pathlib
 p = pathlib.Path('/tmp/p3t1/ces_levels.py'); s = p.read_text()
@@ -390,8 +390,8 @@ document.
 
 ```bash
 rm -rf /tmp/p3t2 && mkdir -p /tmp/p3t2
-cp /Users/lowell/Projects/impute-suppressed-stats/scripts/audit/cbp_regime.py /tmp/p3t2/
-cp /Users/lowell/Projects/impute-suppressed-stats/scripts/audit/_common.py /tmp/p3t2/
+cp /Users/lowell/Projects/logging-employment/scripts/audit/cbp_regime.py /tmp/p3t2/
+cp /Users/lowell/Projects/logging-employment/scripts/audit/_common.py /tmp/p3t2/
 python3 -c "
 import pathlib
 p = pathlib.Path('/tmp/p3t2/cbp_regime.py'); s = p.read_text()
@@ -1053,7 +1053,7 @@ def test_the_break_adjusted_docstring_scopes_its_own_claim() -> None:
 
 ```bash
 rm -rf /tmp/p3t4 && mkdir -p /tmp/p3t4
-cp -R /Users/lowell/Projects/impute-suppressed-stats/src/logging_employment /tmp/p3t4/
+cp -R /Users/lowell/Projects/logging-employment/src/logging_employment /tmp/p3t4/
 python3 -c "
 import pathlib
 p = pathlib.Path('/tmp/p3t4/logging_employment/baselines/historical.py'); s = p.read_text()
@@ -1178,7 +1178,7 @@ retired plan.
 
 ```bash
 rm -rf /tmp/p3t5 && mkdir -p /tmp/p3t5
-cp -R /Users/lowell/Projects/impute-suppressed-stats/src/logging_employment /tmp/p3t5/
+cp -R /Users/lowell/Projects/logging-employment/src/logging_employment /tmp/p3t5/
 python3 -c "
 import pathlib
 p = pathlib.Path('/tmp/p3t5/logging_employment/reconcile/scaling.py'); s = p.read_text()
@@ -1424,7 +1424,7 @@ Then the identity and margin-guard mutants:
 
 ```bash
 rm -rf /tmp/p3t5b && mkdir -p /tmp/p3t5b
-cp -R /Users/lowell/Projects/impute-suppressed-stats/src/logging_employment /tmp/p3t5b/
+cp -R /Users/lowell/Projects/logging-employment/src/logging_employment /tmp/p3t5b/
 python3 -c "
 import pathlib, re
 p = pathlib.Path('/tmp/p3t5b/logging_employment/reconcile/projection.py'); s = p.read_text()
