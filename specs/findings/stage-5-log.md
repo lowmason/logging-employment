@@ -402,3 +402,19 @@ total, so it holds once §12.2 names `N_t`, and it needed no edit.
 §15.2 defines the residual, and it named an owner that could no longer act:
 
 > `reconcile/anchor.py::national_residual` stamps `anchor_basis = 'declared_national_total'` (Stage 3 `SHIPPED` point (5)), while spec §12.2 and §15.2 still define the residual against a "compatible national total", which SRC-QCEW-006 declined. That amendment, together with Appendix A's three missing fields, is owned only by the retired `specs/completed/stage5-preconditions.md` §6.
+
+## 2026-09-26 — `/deferred` quick fixes: `D-122` and `D-123` land
+
+Both were filed by the pass above and fixed test-first. `D-122`: `Anchor.__post_init__` refuses an
+`anchor_basis` outside `contracts.ANCHOR_BASES`, which is the only basis check this stage's draws path
+has. `D-123`: `assert_universe_closes` halts the run on a month with no suppressed state cell whose
+integer residual is not 0, the check §12.2's retirement condition requires. Neither changes D1 output:
+every anchor is built with `declared_national_total`, and none of the 96 months has an empty missing
+set. The local suite rose from 1532 to 1538 passed: the six new tests, and nothing else moved.
+
+**Superseded readings** (stage-block rule 1), replaced in the roadmap's Stage 5 `Consumes` as PR #33
+merged it (`eddc488`):
+
+> Open items that name this stage: `D-109`, `D-115`, `D-116`, `D-122`.
+
+> Since `D-120`, spec §12.2 names that anchor, the establishment-closure gate that admits it and its retirement condition (whose identity check no code runs yet, `D-123`), and §15.2's release fields carry `anchor_basis`; SRC-QCEW-006's `decline` stands. §7.11's `posterior_summary`, this stage's own artifact, has no `anchor_basis` column, so on the draws path nothing checks an anchor's basis until `D-122` refuses a bad one when the `Anchor` is built.
