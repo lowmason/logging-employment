@@ -53,10 +53,15 @@ from .fallback import DISCLOSED_QCEW, compose_with_declared_fallback
 from .interfaces import Decline, EmployeeWeights, EstimatorContext
 
 
+def _month_index(month: str) -> int:
+    """A `YYYY-MM` as a count of months, so two months subtract to their calendar distance."""
+    year, index = (int(part) for part in month.split("-"))
+    return year * 12 + (index - 1)
+
+
 def _months_before(month: str, count: int) -> str:
     """The `YYYY-MM` exactly `count` months earlier, for bounding a lookback in calendar time."""
-    year, index = (int(part) for part in month.split("-"))
-    total = year * 12 + (index - 1) - count
+    total = _month_index(month) - count
     return f"{total // 12:04d}-{total % 12 + 1:02d}"
 
 
@@ -203,23 +208,31 @@ class RollingMedianShare(_ShareBaseline):
 
 
 class ExponentiallyWeightedShare(_ShareBaseline):
-    """§10.3 variant 4: a geometric discount whose half-life is twelve OBSERVATIONS, not months.
+    """§10.3 variant 4: a geometric discount whose half-life is twelve CALENDAR MONTHS.
 
-    `_reduce` raises `decay` to each share's position in `shares`, and `observed_share_history`
-    keeps disclosed months only, so a suppressed month is absent from the list rather than present
-    at a low weight. The half-life is one year only for a gap-free history; every gap stretches it
-    in calendar time. This docstring used to claim a one-year half-life unconditionally, and `D-095`
-    measured how far gappy histories depart from it. §10.3 names no decay form, so this records
-    what the code does rather than a spec violation. A month-based decay would move estimates, and
-    `D-113` records when that becomes worth doing.
+    `_reduce` weighs each share by `decay` raised to its age in months, so a share a year older
+    than the newest counts half as much. Until `D-113` it raised `decay` to the share's POSITION in
+    the list instead, and because `observed_share_history` keeps disclosed months only, a
+    suppressed month shortened the list rather than ageing the shares behind it: the half-life was
+    twelve OBSERVATIONS, and every gap stretched it in calendar time (`D-095` measured how far).
+    §10.3 names no decay form, so the unit is a modelling choice; the owner chose calendar months.
+
+    AGES ARE COUNTED BACK FROM THE NEWEST OBSERVATION, NOT FROM THE TARGET MONTH. The weights are
+    normalized, so the two differ by a common factor that cancels and give the same mean. Counting
+    from the newest share keeps a gap-free history's exponents equal to the old list positions, so
+    such a history reduces bit-identically to the per-observation form and only gappy histories
+    move. It also means how long ago the newest share was published changes nothing here: the
+    staleness of a whole history is the lookback's business, and the lookback is bounded in months.
     """
 
     estimator_id = "share_exponentially_weighted"
     decay = 0.5 ** (1.0 / 12.0)
 
     def _reduce(self, shares, anchor, history):
-        """A geometrically discounted mean, heaviest on the most recent share."""
-        weights = [self.decay ** (len(shares) - 1 - i) for i in range(len(shares))]
+        """A geometrically discounted mean, each share weighted by its age in calendar months."""
+        months = [_month_index(month) for month in history["reference_month"].to_list()]
+        newest = max(months)
+        weights = [self.decay ** (newest - month) for month in months]
         return sum(w * s for w, s in zip(weights, shares, strict=True)) / sum(weights)
 
 

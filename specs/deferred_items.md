@@ -2204,7 +2204,7 @@ the event that makes it reachable rather than a date.
 Filed while fixing the 2026-09-12 triage's quick-fix batch: the halves of fixed items that the fix
 deliberately left open.
 
-- [ ] `D-113` **`ExponentiallyWeightedShare` discounts per observation, so a gappy history's
+- [x] `D-113` **`ExponentiallyWeightedShare` discounts per observation, so a gappy history's
       half-life in months exceeds its twelve observations.** Split from `D-095` on 2026-09-12, when
       that item's docstring half was fixed: `baselines/historical.py` now says the half-life is
       twelve OBSERVATIONS, and nothing yet decides whether it should be twelve MONTHS. `_reduce`
@@ -2220,6 +2220,17 @@ deliberately left open.
       Size: plan. Revisit if: `share_exponentially_weighted` becomes `preferred_baseline` in any
       regime (re-measured 2026-09-12 on `runs/f03023ac9f3a`: preferred in none of the nine, which
       name `share_last_observed` in 3 and `cbp_intensity` in 6), or §10.3 gains a decay form.
+      → done 2026-09-26 (owner's decision: calendar months): `5667d93` weights each share by
+      `decay` raised to its age in months, counted back from the newest observation, and the
+      half-life stays twelve. The revisit-if had fired unrecorded: `runs/4cf47a918dd8` names this
+      estimator `preferred_baseline` for `structural_break`, and re-run at `5667d93` it still does,
+      with the other eight regimes' comparands unchanged too (`specs/findings/stage-5-log.md`). Two
+      sentences above were wrong. `baseline_results_golden.parquet` does not move --
+      `tests/fixtures/baselines` has 3 suppressed cells with a history and 0 gappy -- so only the
+      validation golden was re-pinned. And D-095's 49 / 7.18% is not reproduced: on the same
+      population (338 histories of two or more points, 120 gappy, 327 with an own share) 47 cells
+      move by more than 1% in the reduced share (largest 7.73%) and 52 after §12.2's allocation
+      (2 above 5%, largest 7.60%); neither D-095 nor the review it came from recorded a method.
 - [x] `D-114` **CBP's `naics_vintage` stamp is QCEW's rule, so `cbp_state_size`'s 2022 and 2023
       rows read "NAICS 2022" against CBP's own "2017 NAICS code" label.** Split from `D-098` on
       2026-09-12, when that item's docstring half was fixed and the stamp was documented at
@@ -2271,6 +2282,9 @@ review and from fixing it.
       `tests/fixtures/validation/validation_metrics_golden.parquet`.
       Size: plan. Revisit if: the Stage 5 comparand is re-run for another reason (the predictor then costs
       no extra re-run), or §13.2's propensity model is revisited.
+      That condition fired on 2026-09-26, when `D-113` re-ran the comparand, and this was left out on
+      purpose: a new predictor re-draws every regime's mask, so bundling it would have left the
+      scoreboard's movement unattributable between the two changes. It now costs a re-run of its own.
 - [ ] `D-117` **A parent-margin row fuses two sources, and nothing compares their release or publication vintage.**
       `constraints/rows.py::parent_margin_rows` couples a suppressed `qcew_monthly` state cell with its
       `qcew_state_parent` parent, and `constraints/compat.py::assert_parent_margin_compatible` checks
