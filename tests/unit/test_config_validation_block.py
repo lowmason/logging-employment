@@ -1,4 +1,5 @@
 import ast
+import math
 from pathlib import Path
 
 import pytest
@@ -34,11 +35,43 @@ def test_promotion_gates_carry_appendix_a_defaults():
     assert p.nominal_coverage_tolerance == 0.05
 
 
+def test_the_catastrophic_coverage_alpha_is_one_in_a_thousand():
+    """Plan 16's origination: §13.10 says "does not fail catastrophically" and states no number.
+
+    At 0.001 over 18 strata (9 regimes, 9 divisions), a calibrated model is flagged somewhere with
+    probability 0.0122 (the plan's Decision 4).
+    """
+    assert PromotionConfig().catastrophic_stratum_coverage_alpha == 0.001
+
+
+def test_every_promotion_threshold_is_finite_and_the_alpha_is_a_probability():
+    """Plan 16's promotion record is the first code to read these, and a non-finite one breaks it
+    silently or late. A NaN degradation ceiling or alpha makes its comparison false, so the gate
+    stops flagging degraded divisions or catastrophic strata. `-inf` counts every regime's WAPE as
+    improved. A NaN or infinite tolerance raises inside `Fraction`, but only after the replicate
+    fits. So each is refused at load, naming the field (§18.3). Read off the model, so a threshold
+    added later is covered, and the count fails first. An alpha at or below 0 is the same silence
+    as a NaN one, because `cdf < alpha` can never hold."""
+    floats = [
+        name for name, field in PromotionConfig.model_fields.items() if field.annotation is float
+    ]
+    assert len(floats) == 4
+    for name in floats:
+        for value in (math.inf, -math.inf, math.nan):
+            with pytest.raises(ValidationError, match=name):
+                PromotionConfig.model_validate({name: value})
+    for alpha in (0.0, -0.1, 1.0):
+        with pytest.raises(ValidationError, match="catastrophic_stratum_coverage_alpha"):
+            PromotionConfig.model_validate({"catastrophic_stratum_coverage_alpha": alpha})
+
+
 PROMOTION_KEYS = frozenset(
     {
         "minimum_wape_improvement",
         "maximum_major_stratum_wape_degradation",
         "nominal_coverage_tolerance",
+        # Plan 16's, and watched by the same tripwire from the day it was declared.
+        "catastrophic_stratum_coverage_alpha",
     }
 )
 
