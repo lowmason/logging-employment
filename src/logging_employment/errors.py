@@ -94,7 +94,7 @@ class SolverOptionError(LoggingEmploymentError):
     option range run every solve at HiGHS's own default while `deterministic_bounds` recorded the
     configured value as `solver_tolerance`, and `constraints.bounds.classify_bound_status`,
     `baselines.runner.integer_bounds` and `validate.recover.assert_truth_within_bounds` all applied
-    that recorded value to bounds solved at another.
+    that recorded value to bounds solved at another (`D-126`).
 
     Distinct from `SolverError`, which is a solve's OUTCOME that is neither an optimum nor an
     unbounded direction. This is a SETTING refused before any model exists -- it fires inside
