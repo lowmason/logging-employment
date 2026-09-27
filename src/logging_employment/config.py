@@ -328,35 +328,23 @@ class ValidationConfig(_Strict):
 class PromotionConfig(_Strict):
     """§13.10's gates. Configurable engineering thresholds, not findings.
 
-    ALL FOUR KEYS ARE INERT TODAY, and this note is the record R-S5G-3 requires rather than a
-    disclaimer. Each reaches `config.resolved.yaml` and folds into `runs.run_id`, so an unread key
-    is a claim in a run's record that no code backs -- the defect `D-064` names for four other
-    keys. The convention there is to write inertness into the code (`constraints/matrix.py`'s "NO
-    REAL INPUT UNTIL STAGE 6", `errors.py::NoHarvestFactorError`), which is what this is.
+    ALL FOUR KEYS ARE READ BY `validate/promotion.py`, AND BY NOTHING ELSE. `D-109` recorded the
+    three Appendix A keys as inert until §13.10 had a candidate to evaluate. Plan 16's state-total
+    model is that candidate: `validate-state-model` applies the gates and writes
+    `promotion_record.json`, and every key reaches that record's `thresholds` beside the evidence it
+    was applied to. `catastrophic_stratum_coverage_alpha` is plan 16's own. §13.10's "does not fail
+    catastrophically in any major stratum" states no number, and this is the exact binomial
+    lower-tail level below which a regime's or a Census division's 90% coverage counts as
+    catastrophic.
 
-    They are inert for different reasons, and the distinction is the useful half:
+    THE COVERAGE COMPARISON IS EXACT (`D-109`). Hits over `calibration_sample_size` are a
+    `Fraction`, compared against `Fraction(repr(nominal_coverage_tolerance))`. So 17/20 against
+    0.90 +/- 0.05 counts as within, where the float `abs(0.85 - 0.9) <= 0.05` does not: 44 of
+    `runs/f03023ac9f3a`'s 170 interval-bearing groups sat at exactly 0.85.
 
-    - `maximum_major_stratum_wape_degradation` and `nominal_coverage_tolerance` have their INPUT as
-      of R-S5G-1. `validate/metrics.py` now emits a per-census-division WAPE and a per-division
-      90% coverage into `validation_metrics.parquet`, so both gates are evaluable from a shipped
-      artifact. The coverage values `nominal_coverage_tolerance` would gate on carried a
-      residual-sign defect until `D-112` (fixed 2026-09-12, `19fbdec`); one written before that fix
-      must be regenerated before any gate reads it. What is missing is the CANDIDATE to evaluate: §13.10 compares a model against the
-      preferred transparent baseline and Stage 5 produces the model.
-    - `minimum_wape_improvement` is missing both. Its comparison needs a second scoreboard, and
-      `validation_scoreboard.parquet` exists in one copy -- the baseline one.
-    - `catastrophic_stratum_coverage_alpha` is plan 16's. §13.10's "does not fail catastrophically
-      in any major stratum" states no number, and this is the exact binomial lower-tail level the
-      promotion record plan 16 builds will read. It is declared with the `model:` block, in one
-      commit, so `runs.run_id` moves once rather than twice.
-
-    NO EVALUATOR IS BUILT HERE, deliberately. A function whose primary argument is Stage 5's
-    not-yet-designed output would fix that signature by guessing it, and three of §13.10's six
-    gates (hard constraints on draws, convergence diagnostics, disclosure review) are Stage-5 and
-    Stage-8 concepts an evaluator written now could not represent at all. Stage 5 wires these;
-    `tests/unit/test_config_validation_block.py` fails the day `src/` code names one of the keys --
+    `tests/unit/test_config_validation_block.py` fails the day another `src/` module names a key --
     as an attribute, a string, a parameter or a keyword argument, `config.py` itself included -- so
-    this docstring cannot quietly outlive that truth. A reader that never spells a key exactly -- a
+    this note cannot quietly outlive that truth. A reader that never spells a key exactly -- a
     generic `model_dump()` loop, or a dotted path string such as `attrgetter("promotion.<key>")` --
     would not trip it; update this note by hand in that case.
     """
