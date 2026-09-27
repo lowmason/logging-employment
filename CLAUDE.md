@@ -203,7 +203,9 @@ in `runs/<run_id>/` beside one JSON manifest per command.
   **Plan 16 re-identified every run once, on purpose**: `model:` stays in the dump because every
   key in it changes the draws, and `promotion.catastrophic_stratum_coverage_alpha` was added in the
   same commit so the id moved once. The config-only canary moved `39d1d0859838` → `14352bb8e56e`
-  and the staged pin `4cf47a918dd8` → `dd7337e89047`.
+  and the staged pin `4cf47a918dd8` → `dd7337e89047`. The §13.10 comparand was re-run under the
+  new id and matched `runs/4cf47a918dd8` byte for byte, manifests aside from `code_commit` and
+  `uv_lock_sha256` (`specs/findings/stage-5-log.md`).
 - **A run directory can be stale w.r.t. your code.** `run_id` ignores source, so editing an
   estimator and re-running overwrites the same `runs/<id>/`. The one cross-stage check that does
   fire is `constraint_set_hash` (see `constraints/CLAUDE.md`). `solve-bounds` checks the constraint

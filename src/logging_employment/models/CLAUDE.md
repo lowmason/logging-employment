@@ -49,6 +49,19 @@ about to change before you change it.
 - **Means are summed with `math.fsum`** (`reconciliation.exact_column_means`), because
   `ndarray.mean(axis=0)` moved a persisted mean in its last place with memory layout. The summary's
   and the harness's point estimates are digested, so they must depend on the values alone.
+- **Measured on D1 on 2026-09-27 (plan 16, Task 15), a dated witness.** `runs/dd7337e89047`'s
+  production fit (seed 3645, jax 0.11.2, numpyro 0.22.0) passed §11.14's gate with 0 divergences,
+  parameter R-hat 1.0067, cell R-hat 1.0045, cell ESS bulk 1,010 and tail 434 against a floor of
+  400, one-step 90% coverage 0.904, anchor drift 4.5e-13 and 0 bound violations. `fit-state-model`
+  took 139.5 s wall, at 31.0 leapfrog steps a draw with a tree-depth saturation share of 0.0. Of the
+  1,227 imputed cells, 189 have a zero-width 90% interval on their §9 upper bound. §13.10's verdict
+  is `not_beaten`, so `section_10_8_hierarchy` is selected, provisionally until Stage 7. Three gates
+  failed:
+  - coverage, pooled 940 of 1,253 = 0.750;
+  - improvement, where 5 of 9 regimes are worse than their comparand on matched WAPE;
+  - convergence, where 1 of 27 replicates had parameter R-hat 1.0187.
+
+  Recompute before citing a number. See `specs/findings/stage-5-log.md`.
 
 ## The model's structural choices (plan 16, Decision 7)
 

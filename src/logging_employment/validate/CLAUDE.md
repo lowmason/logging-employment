@@ -302,5 +302,6 @@ uv run logging-estimates validate-state-model --config config.yaml   # 27 fits o
 - The dated D1 numbers this package quotes (4,716 state cells in single-cell components before
   plan 15, 756 of which now share one with their `state_parent`; 272/400 fully observed
   state-years; the six never-observed FIPS; `runs/f03023ac9f3a`, superseded as §13.10's comparand
-  by `runs/4cf47a918dd8`) live in the docstrings and in `tests/unit/test_validate_regimes.py`.
+  by `runs/4cf47a918dd8`, re-run byte for byte by plan 16 as `runs/dd7337e89047` when the `model:`
+  block re-identified every run) live in the docstrings and in `tests/unit/test_validate_regimes.py`.
   Recompute before citing one.

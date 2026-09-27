@@ -418,3 +418,194 @@ merged it (`eddc488`):
 > Open items that name this stage: `D-109`, `D-115`, `D-116`, `D-122`.
 
 > Since `D-120`, spec §12.2 names that anchor, the establishment-closure gate that admits it and its retirement condition (whose identity check no code runs yet, `D-123`), and §15.2's release fields carry `anchor_basis`; SRC-QCEW-006's `decline` stands. §7.11's `posterior_summary`, this stage's own artifact, has no `anchor_basis` column, so on the draws path nothing checks an anchor's basis until `D-122` refuses a bad one when the `Anchor` is built.
+
+## 2026-09-27 — plan 16 on D1: the comparand re-run byte for byte, the production fit, the promotion record
+
+Plan 16 executed inline (executing-plans), one commit per task, on `worktree-plan16-stage5` from
+`main` at `956f52c`. The plan was written at `40b2688`. Main had since merged #38 and #39, 38
+hermetic tests between them, and #40, which changed only the plan's text. Before Task 1, all 22 of
+the plan's diff blocks applied in plan order at `956f52c`.
+
+One deviation was approved at execution. `h5netcdf` 1.8.1 made its HDF5 backends extras, so the
+plan's bare `h5netcdf>=1.8.1` installed none, and Task 1's round-trip probe failed with "No module
+named 'h5py', backend not available". The dependency is now `h5netcdf[h5py]>=1.8.1` (h5py 3.16.0).
+No version already in `uv.lock` moved. The 13 tests that needed h5netcdf ran for the first time and
+all passed.
+
+**Suite counts, measured.** Base at `956f52c` with `data/` linked: 1608 passed for the whole suite,
+and 1581 passed, 27 deselected for the non-slow tier. Every task's non-slow delta was the plan's, 125
+in all, ending at 1706 passed, 47 deselected. At Task 14 with `data/`: 1753 passed, 0 skipped
+(1608 + 145), and nothing under `data/` or `runs/` was written. Without `data/`: the bare run gave
+1681 passed, 72 skipped, and `-m "not slow and not network"` gave 1661 passed, 45 skipped, 47
+deselected. The plan had written 1643/72 and 1623/45/47, predicted at `40b2688`. The difference is
+main's 38 exactly, so `CLAUDE.md` and `ci.yml` carry the measured numbers. Skipped stayed at 72 and
+45, so every test the plan added runs without `data/`. There are seventeen `mark.slow` sites.
+
+**The comparand, re-run under `dd7337e89047`.** Task 15 ran `build-constraints`, `solve-bounds`,
+`run-baselines`, `reconcile` and `validate` at `b666506` with a clean tree. All five exited 0, and
+`validate` took 692.9 s. The byte check printed "15 run files and 3 constraint tables: identical":
+- every Parquet file matches `runs/4cf47a918dd8`'s by sha256;
+- every JSON manifest matches except `code_commit` and `uv_lock_sha256`;
+- `config.resolved.yaml` differs only by `model:` and `promotion.catastrophic_stratum_coverage_alpha`;
+- `build-constraints` rewrote the main checkout's `data/constraints/` with bytes identical to the copy
+  taken first.
+
+Nothing under `runs/4cf47a918dd8`, `runs/f03023ac9f3a`, `runs/source_manifest.parquet`, `data/staged`
+or `data/raw` was written.
+
+**The production fit.** `fit-state-model` exited 0 in 139.5 s wall ("fit 4 chains; gate passed;
+1227 cells reconciled"). This was its first run on the locked jax 0.11.2 and numpyro 0.22.0.
+`posterior/diagnostics.json`, in full:
+
+```json
+{
+  "cells_constant": 0,
+  "checks": {
+    "cell_ess_bulk_min": {
+      "gating": true,
+      "passed": true,
+      "threshold": 400.0,
+      "value": 1009.993799359656
+    },
+    "cell_ess_tail_min": {
+      "gating": true,
+      "passed": true,
+      "threshold": 400.0,
+      "value": 433.91598390921814
+    },
+    "cell_rhat_max": {
+      "gating": true,
+      "passed": true,
+      "threshold": 1.01,
+      "value": 1.0044927598072078
+    },
+    "divergences": {
+      "gating": true,
+      "passed": true,
+      "threshold": 0.0,
+      "value": 0.0
+    },
+    "parameter_ess_bulk_min": {
+      "gating": false,
+      "passed": true,
+      "threshold": 400.0,
+      "value": 654.6116146720314
+    },
+    "parameter_ess_tail_min": {
+      "gating": false,
+      "passed": true,
+      "threshold": 400.0,
+      "value": 799.877996606086
+    },
+    "parameter_rhat_max": {
+      "gating": true,
+      "passed": true,
+      "threshold": 1.01,
+      "value": 1.0066868251700758
+    },
+    "ppc_coverage_90": {
+      "gating": true,
+      "passed": true,
+      "threshold": 0.85,
+      "value": 0.9041016753321779
+    },
+    "reconciliation_anchor_drift_max": {
+      "gating": true,
+      "passed": true,
+      "threshold": 1e-09,
+      "value": 4.547473508864641e-13
+    },
+    "reconciliation_bound_violations": {
+      "gating": true,
+      "passed": true,
+      "threshold": 0.0,
+      "value": 0.0
+    }
+  },
+  "code_commit": "b666506be2579ad57c3edcd7134ca8ca458b6b3d",
+  "constraint_set_hash": "83b95de07b1b21d733e8aaae4ad18955d5f07c503d67b3b785a5216aed7f80c6",
+  "failures": [],
+  "passed": true,
+  "run_id": "dd7337e89047",
+  "scope": "production",
+  "uv_lock_sha256": "f3dc9f623a90a35a92321033171b3f12c2ae30a70152ac46aafea32792a7b8cd"
+}
+```
+
+The `sampler` block of `state_model_manifest.json`:
+
+```json
+{
+  "backend": "numpyro",
+  "chain_method": "vectorized",
+  "chains": 4,
+  "draws": 1000,
+  "jax_version": "0.11.2",
+  "max_tree_depth": 10,
+  "mean_leapfrog_steps": 31.0,
+  "model_id": "state_total_model",
+  "model_version": "student_t_ar1.1",
+  "numpyro_version": "0.22.0",
+  "seed": 3645,
+  "target_accept": 0.9,
+  "tree_depth_saturation_share": 0.0,
+  "warmup": 1000
+}
+```
+
+The fit reproduces Decision 15's profile: 31 leapfrog steps a draw, no tree at the depth ceiling,
+and posterior medians σ_η 0.0364 and ρ 0.838. Two margins are thinner than on the older environment.
+Parameter R-hat is 1.0067 against 1.0047 there, and cell tail ESS is 434 against 1,176, where the
+floor is 400. `reconcile` then re-read the store: 4,000 draws × 1,227 cells over 96 months, max
+anchor drift 4.547e-13, 0 bound violations, a matching draws digest, and `state_model.passed` true.
+
+**Cells on a bound.** Of 1,227 imputed cells, 189 have a zero-width 90% interval, and every one sits
+on its §9 upper bound: VT (50) 67, NM (35) 28, NH (33) 22, CO (08) 20, UT (49) 14, WV (54) 12, WI
+(55) 12, KY (21) 5, IA (19) 4, CT (09) 2, WY (56) 2, SD (46) 1. The older environment gave 192.
+
+**The promotion record.** `validate-state-model` exited 0 after 3,826 s wall, 63.8 minutes against
+the plan's estimate of about 77. It wrote `not_beaten` and selected `section_10_8_hierarchy`.
+`provisional` is true until "Stage 7 re-runs §13.10 with the harvest factor and §11.13's variants",
+and `disclosure_review` is `pending_stage_8`. Both `replicates_checked` are 27. The `comparand` block
+names `dd7337e89047` and the sha256 of its three validation tables, which equal
+`runs/4cf47a918dd8`'s. Each gate:
+
+| gate | passed | what decided it |
+|---|---|---|
+| `hard_constraints` | true | 0 bound violations and anchor drift 4.5e-13, for the production draws in memory and in the store and for all 27 replicates |
+| `convergence` | false | 1 replicate of 27, `whole_seasonal_blocks` seed 2048, had parameter R-hat 1.0187 against 1.01. The other 26 ran from 1.0037 to 1.0079, and all 27 had 0 divergences |
+| `coverage` | false | pooled 940 of 1,253 = 0.750, against 0.90 ± 0.05. Catastrophic at α 0.001 in 7 of 9 regimes and 6 of 9 divisions. Within tolerance only in `clustered_states_within_month`, 55 of 60 |
+| `improvement` | false | matched-pair WAPE beats the comparand in 4 of 9 regimes: `whole_seasonal_blocks` +72.2%, `clustered_states_within_month` +54.5%, `naics_transition` +42.3%, `structural_break` +16.3%. It loses in 5: `long_consecutive_runs` −59.5%, `regional_blocks` −68.3%, `small_cell_biased` −90.3%, `whole_state_year_blocks` −124%, `concentration_proxy` −235%. The calibrated-uncertainty alternative rescues none, because the model's own coverage is catastrophic in each |
+| `stratum_degradation` | true | the model's WAPE, pooled across regimes, is below the comparand's in all 9 divisions, by 36% to 62% |
+| `disclosure_review` | `pending_stage_8` | Stage 8 |
+
+Any one of the three failures makes the verdict `not_beaten`, because `evaluate_promotion` requires
+all five gates to pass (Decision 4). The model is more accurate where most of the pool lies, since
+`whole_seasonal_blocks` is 69% of it. But its reconciled-draw intervals are too narrow on hidden
+cells, and the simpler comparand beats it in five of the smaller regimes. Several replicate fits
+would fail production scope, recorded for information: cell R-hat reached 1.0167, and cell tail ESS
+fell to 228.
+
+§19 Phase 3's acceptance, read against this run:
+- "diagnostics pass" holds for the production fit and for 26 of the 27 replicate fits;
+- "constraints pass on every draw" holds;
+- the baselines are not beaten, so the simpler method is retained.
+
+**`D-109`'s evidence (Task 12 Step 4).** Before its conversion, the tripwire reddened naming all four
+keys:
+
+```text
+E       AssertionError: now read by {'validate/promotion.py': ['catastrophic_stratum_coverage_alpha', 'maximum_major_stratum_wape_degradation', 'minimum_wape_improvement', 'nominal_coverage_tolerance']}; update PromotionConfig's docstring
+FAILED tests/unit/test_config_validation_block.py::test_the_promotion_keys_are_still_unread_and_the_docstring_still_says_so
+1 failed, 6 passed
+```
+
+**Open for the Plan Completion Protocol:**
+- Decision 7's four flagged readings: §11.3's exact observation, §11.12's capped persistence,
+  §11.14's non-centred SHOULD set aside for trained states, and §11.1's split X.
+- Decision 15's open points: the 189 imputed cells whose interval is a bound, and the unstable
+  posterior means in NV and RI.
+- `run-baselines`' unchecked bounds hash (Decision 9).
+- The dispositions of `D-116` and `D-115` (Decision 1). `D-116` is declined again, because a new
+  propensity predictor would re-draw every regime's mask. `D-115` is not taken, because the model and
+  the comparand are scored on one identification set.
