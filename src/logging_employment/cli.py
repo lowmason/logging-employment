@@ -728,3 +728,143 @@ def validate_command(
     _write_manifest(run / "validation_manifest.json", manifest)
     for regime, entry in sorted(result.manifest["regimes"].items()):
         typer.echo(f"{regime} {entry['disposition']} scored={entry['n_scored']}")
+
+
+@app.command("validate-state-model")
+def validate_state_model_command(
+    config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
+) -> None:
+    """Score §11's model through §13's harness and write §13.10's promotion record.
+
+    Not in §16.1's list: plan 16 adds it so `validate` stays the comparand's command, byte-identical
+    to Stage 4's. The comparand is this run's own `validate` output. The precondition is that
+    output, plus `fit-state-model`'s `posterior/diagnostics.json` from this run's constraint set:
+    a fit from another is refused before anything is deleted (`_stale_fit`). A production fit that
+    failed §11.14 is recorded as not beaten without running the harness. Otherwise the model is
+    scored through `run_pseudo_suppression`'s own loop (`StateModelProducer`), which is 27 fits on
+    D1. Its tables go to `state_model_validation/` and the verdict to `promotion_record.json`. Both
+    verdicts exit 0, because "deploy the simpler method" is an outcome and not an error.
+    """
+    import hashlib
+    import json
+    import shutil
+
+    import polars as pl
+
+    from .build import write_parquet_deterministic
+    from .contracts import (
+        VALIDATION_METRIC_SCHEMA,
+        VALIDATION_SCORE_SCHEMA,
+        VALIDATION_SCOREBOARD_SCHEMA,
+        HarmonizedData,
+        assert_required_columns_present,
+        validate_frame,
+    )
+    from .models.arviz_io import draws_digest, read_store, store_digest
+    from .models.interfaces import MODEL_ID, MODEL_VERSION, STORE_PATH
+    from .models.reconciliation import check_reconciled
+    from .models.validation import StateModelProducer
+    from .runs import run_dir, run_id
+    from .validate.harness import run_pseudo_suppression
+    from .validate.promotion import evaluate_promotion, production_failed_record
+
+    cfg = load_config(config)
+    rid = run_id(cfg, _input_digests(cfg))
+    run = run_dir(cfg, rid)
+    comparand = {
+        table: run / f"{table}.parquet"
+        for table in ("validation_scores", "validation_metrics", "validation_scoreboard")
+    }
+    diagnostics = run / "posterior" / "diagnostics.json"
+    for path, command in [
+        *((p, "validate") for p in comparand.values()),
+        (diagnostics, "fit-state-model"),
+    ]:
+        if not path.exists():
+            raise typer.BadParameter(
+                f"{path} is missing: §13.10 compares the model against this run's own comparand "
+                f"and reads its production gate. Run `{command}` first"
+            )
+    # Before the gate is read and before anything is deleted: a stale fit is neither scored nor
+    # written up as not beaten, and the last record survives the refusal.
+    stale = _stale_fit(run)
+    if stale is not None:
+        raise typer.BadParameter(
+            f"{diagnostics} records constraint set {stale['fit_constraint_set_hash']!r}, but "
+            f"{run / 'schema_manifest.json'} names {stale['constraint_set_hash']!r}: the fit was "
+            "reconciled against another constraint set. Run `solve-bounds` and `fit-state-model` "
+            "first"
+        )
+    out = run / "state_model_validation"
+    shutil.rmtree(out, ignore_errors=True)
+    (run / "promotion_record.json").unlink(missing_ok=True)
+    out.mkdir(parents=True)
+    envelope = {
+        "run_id": rid,
+        "model_version": MODEL_VERSION,
+        "comparand": {
+            "run_id": rid,
+            **{
+                f"{table}_sha256": hashlib.sha256(path.read_bytes()).hexdigest()
+                for table, path in comparand.items()
+            },
+        },
+    }
+    production_gate = json.loads(diagnostics.read_text())
+    if not production_gate["passed"]:
+        record = production_failed_record(MODEL_ID, production_gate, cfg.promotion)
+        _write_manifest(run / "promotion_record.json", {**record, **envelope})
+        typer.echo("production fit failed §11.14: not_beaten, section_10_8_hierarchy selected")
+        return
+
+    store = run / STORE_PATH
+    draws = read_store(store)
+    check = check_reconciled(draws, tolerance=cfg.reconciliation.tolerance)
+    store_check = {
+        "max_anchor_drift": check.max_anchor_drift,
+        "bound_violations": check.bound_violations,
+        "draws_sha256_matches": draws_digest(draws) == store_digest(store),
+    }
+    store_check["passed"] = check.passed and bool(store_check["draws_sha256_matches"])
+
+    data = HarmonizedData.load(Path(cfg.storage.staged_uri))
+    result = run_pseudo_suppression(data, config=cfg, producer=StateModelProducer())
+    for frame, schema, table in (
+        (result.scores, VALIDATION_SCORE_SCHEMA, "validation_scores"),
+        (result.metrics, VALIDATION_METRIC_SCHEMA, "validation_metrics"),
+        (result.scoreboard, VALIDATION_SCOREBOARD_SCHEMA, "validation_scoreboard"),
+    ):
+        validate_frame(frame, schema, table)
+        assert_required_columns_present(frame, table)
+    hashes = {
+        table: write_parquet_deterministic(frame, out / f"{table}.parquet")
+        for table, frame in (
+            ("validation_scores", result.scores),
+            ("validation_metrics", result.metrics),
+            ("validation_scoreboard", result.scoreboard),
+        )
+    }
+    _write_manifest(
+        out / "validation_manifest.json",
+        {**result.manifest, "estimators": [MODEL_ID], "output_hashes": hashes},
+    )
+    record = evaluate_promotion(
+        model_id=MODEL_ID,
+        model_scores=result.scores,
+        model_metrics=result.metrics,
+        comparand_scores=pl.read_parquet(comparand["validation_scores"]),
+        comparand_metrics=pl.read_parquet(comparand["validation_metrics"]),
+        comparand_scoreboard=pl.read_parquet(comparand["validation_scoreboard"]),
+        production_gate=production_gate,
+        production_store_check=store_check,
+        replicate_gates={
+            regime: list(entry["producer_notes"])
+            for regime, entry in result.manifest["regimes"].items()
+            if entry.get("producer_notes")
+        },
+        promotion=cfg.promotion,
+    )
+    _write_manifest(
+        run / "promotion_record.json", {**record, **envelope, "model_validation_hashes": hashes}
+    )
+    typer.echo(f"verdict {record['verdict']}; selected {record['selected_method']}")
