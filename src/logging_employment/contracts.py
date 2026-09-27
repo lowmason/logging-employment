@@ -235,9 +235,9 @@ DECLINE_KINDS: tuple[str, ...] = ("by_design", "data_gap", "reconciliation_failu
 def assert_declared_provenance(frame: pl.DataFrame) -> None:
     """Refuse a provenance value outside its declared tuple.
 
-    The seven tuples this checks (`RECONCILIATION_STATUSES`, `WEIGHT_BASES`, `ANCHOR_BASES`,
-    `DECLINE_KINDS`, `SUPPRESSION_TYPES`, `STRATUM_KINDS`, `MASK_ARMS`) are the closed sets a
-    baseline row's provenance may draw from, but
+    The eight tuples this checks (`RECONCILIATION_STATUSES`, `WEIGHT_BASES`, `ANCHOR_BASES`,
+    `DECLINE_KINDS`, `SUPPRESSION_TYPES`, `STRATUM_KINDS`, `MASK_ARMS`, `OBSERVED_OR_IMPUTED`) are
+    the closed sets a row's provenance may draw from, but
     `BASELINE_RESULT_SCHEMA` checks dtypes only -- `pl.String` accepts any string. `weight_basis`
     is the live exposure: `run_baselines` copies it from an estimator's own `outcome.basis`, so a
     third-party estimator's typo reached `baseline_results.parquet` and passed every test. Nulls
@@ -259,6 +259,8 @@ def assert_declared_provenance(frame: pl.DataFrame) -> None:
         # a literal at the emit sites, so its value comes from data. Both harness calls pass a
         # frame that carries it: the scored frame and the assembled metrics.
         ("mask_arm", MASK_ARMS),
+        # Plan 16. §7.11 names the column and gives no values; `models/summary.py` writes two.
+        ("observed_or_imputed", OBSERVED_OR_IMPUTED),
     ):
         if column not in frame.columns:
             continue
@@ -378,6 +380,43 @@ ANCHOR_AUDIT_SCHEMA: dict[str, pl.DataType] = {
     "missing_set_size": pl.Int64,
     "anchored": pl.Boolean,
     "implied_intensity": pl.Float64,
+}
+
+
+# §7.11's `observed_or_imputed`, which the spec names and does not enumerate. A published or
+# true-zero cell is `observed` and carries its exact value in every posterior column (INV-001); a
+# suppressed cell is `imputed` from reconciled draws.
+OBSERVED_OR_IMPUTED: tuple[str, ...] = ("observed", "imputed")
+
+# §7.11, in the spec's field order, which is load-bearing (`schema_fingerprint`). One row per
+# state-total cell the panel publishes a row for. Deterministic and posterior intervals are distinct
+# columns and never one another (INV-008): `deterministic_*` is §9's interval copied through, `ci*`
+# the reconciled draws' equal-tailed quantiles. `probability_thresholds_json` and the two
+# `model_sensitivity_*` columns are null in Stage 5 for the reasons `models/summary.py` gives.
+POSTERIOR_SUMMARY_SCHEMA: dict[str, pl.DataType] = {
+    "cell_id": pl.String,
+    "model_id": pl.String,
+    "model_version": pl.String,
+    "run_id": pl.String,
+    "posterior_mean": pl.Float64,
+    "posterior_median": pl.Float64,
+    "ci50_low": pl.Float64,
+    "ci50_high": pl.Float64,
+    "ci80_low": pl.Float64,
+    "ci80_high": pl.Float64,
+    "ci90_low": pl.Float64,
+    "ci90_high": pl.Float64,
+    "ci95_low": pl.Float64,
+    "ci95_high": pl.Float64,
+    "probability_thresholds_json": pl.String,
+    "deterministic_lower": pl.Float64,
+    "deterministic_upper": pl.Float64,
+    "model_sensitivity_low": pl.Float64,
+    "model_sensitivity_high": pl.Float64,
+    "observed_or_imputed": pl.String,
+    "reconciliation_status": pl.String,
+    "constraint_set_hash": pl.String,
+    "source_vintage_set": pl.String,
 }
 
 
