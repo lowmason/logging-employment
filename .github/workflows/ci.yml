@@ -6,12 +6,13 @@
 # gitignored path or a personal file outside the repo (D-055), skips here by design. A green run
 # is therefore no evidence about the D1 integration tests: run those where data/ lives.
 #
-# `-m "not slow and not network"` states the policy the markers declare. Measured 2026-09-13
-# without data/ on the author's Mac: the bare run gives 1408 passed, 72 skipped; this one 1408
-# passed, 45 skipped, 27 deselected. A runner reports 1407 passed, 46 skipped: one audit test skips
-# without a personal file outside the repo (D-055). The six `mark.slow` sites are mostly module-level, so they reach 27 tests, all of
-# which skip without data/, and no test carries `network`: the expression removes nothing that
-# would have run today. It keeps a future slow or live-endpoint test out of this tier instead.
+# `-m "not slow and not network"` states the policy the markers declare. Measured at plan 16's
+# Task 14 without data/ on the author's Mac: the bare run gives 1681 passed, 72 skipped; this one
+# 1661 passed, 45 skipped, 47 deselected. A runner reports one more skip: one audit test skips
+# without a personal file outside the repo (D-055). Of the 47 deselected, 27 are data-bound and
+# would skip here anyway. The other 20 are plan 16's slow state-total model tests, which need no
+# data/ and WOULD run: the expression keeps their minutes of NUTS sampling out of this tier on
+# purpose, and they run locally with `pytest -m slow`. No test carries `network`.
 name: CI
 
 on:
