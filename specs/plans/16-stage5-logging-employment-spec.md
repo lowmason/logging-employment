@@ -49,9 +49,9 @@ pytest; new here: JAX, NumPyro, arviz-base, arviz-stats (with xarray) and h5netc
 
 **Suite counts are stated as deltas, and every delta was measured.**
 - Base, with `data/`: `1570 passed` for the whole suite (12 min) and `1543 passed, 27 deselected` for the non-slow tier (2.5 min), at `40b2688`, measured while this plan was written.
-- Tests added: 138, of which 21 are `slow`, and every one runs without `data/`.
-- Per-task deltas on the non-slow suite: Task 1 +6, Task 2 +16, Task 3 +14, Task 4 +13, Task 5 +8, Task 6 +9, Task 7 +4, Task 8 +12, Task 9 +4, Task 10 +0 (10 slow), Task 11 +14, Task 12 +17, Task 13 +0 (6 slow).
-- The scratch's hermetic count after Task 13 was `1610 passed, 45 skipped, 49 deselected`. With the five h5netcdf tests below, that becomes the `1615 passed, 45 skipped, 48 deselected` Task 14 expects.
+- Tests added: 140, of which 21 are `slow`, and every one runs without `data/`.
+- Per-task deltas on the non-slow suite: Task 1 +6, Task 2 +18, Task 3 +14, Task 4 +13, Task 5 +8, Task 6 +9, Task 7 +4, Task 8 +12, Task 9 +4, Task 10 +0 (10 slow), Task 11 +14, Task 12 +17, Task 13 +0 (6 slow).
+- The scratch's hermetic count after Task 13 was `1612 passed, 45 skipped, 49 deselected`. With the five h5netcdf tests below, that becomes the `1617 passed, 45 skipped, 48 deselected` Task 14 expects.
 
 **What was NOT executed, and why:**
 
@@ -63,8 +63,8 @@ pytest; new here: JAX, NumPyro, arviz-base, arviz-stats (with xarray) and h5netc
   - the four Task 13 tests on the `validated` fixture.
 
   Everything they call below the netCDF layer ran.
-- **Every `requires_staged` test at Tasks 1–14.** The per-task gates ran without `data/`, so these were collected and skipped. The non-slow ones then ran once at Task 14's code with `data/` linked: `1655 passed, 49 deselected`, which is 1543 + 117 less the five h5netcdf tests, the moved pin included. The slow D1 tier was not re-run on plan code; Task 15 Step 4's byte comparison is its check.
-- **Task 14's two measured counts,** predicted from the scratch's: a bare run at Task 14's code without `data/`, leaving out the 13 tests that need h5netcdf, gave `1623 passed, 72 skipped`, and those 13 make it the `1636 passed, 72 skipped` Task 14 expects. The hermetic count is the one above.
+- **Every `requires_staged` test at Tasks 1–14.** The per-task gates ran without `data/`, so these were collected and skipped. The non-slow ones then ran once at Task 14's code with `data/` linked: `1657 passed, 49 deselected`, which is 1543 + 119 less the five h5netcdf tests, the moved pin included. The slow D1 tier was not re-run on plan code; Task 15 Step 4's byte comparison is its check.
+- **Task 14's two measured counts,** predicted from the scratch's: a bare run at Task 14's code without `data/`, leaving out the 13 tests that need h5netcdf, gave `1625 passed, 72 skipped`, and those 13 make it the `1638 passed, 72 skipped` Task 14 expects. The hermetic count is the one above.
 - **Task 15, apart from three pieces.** Its production fit, reconciliation and gate ran on D1 through the scratch code on two seeds, and passed (Decision 15). Seven replicate masks ran through the same fit, reconcile and gate code, outside the CLI. Step 4's byte comparison was dry-run against a doctored copy of the comparand: it accepted exactly the declared differences and named two planted ones. The comparand re-run itself, the CLI's 27 replicate fits, and every fit on the locked versions happen first at execution.
 
 ---
@@ -96,6 +96,7 @@ The brief leaves these open, or flags them for an explicit decision. Each gives 
    - **A regime whose `preferred_baseline` is `None` is `not_applicable`**, neither a pass nor a failure (Stage 4's SHIPPED point (3)). At least one regime must have a comparand.
    - **The verdict** is `beat` or `not_beaten`. `selected_method` is `state_total_model` or `section_10_8_hierarchy` (§13.10's last line). `provisional` is always true, because Stage 7 adds the harvest factor and re-runs the gate (Stage 7's Produces). Disclosure review is `pending_stage_8`, never passed.
    - **Hard constraints and convergence include every replicate fit.** A model that converged on the full panel and not on a masked one has not shown that its convergence holds.
+   - **Every threshold is refused at load unless finite, and α unless it lies in (0, 1).** This plan's record is the first code to read the three Appendix A keys (Decision 3), and each comparison fails the wrong way on a non-finite value. A NaN degradation ceiling or α makes its test false, so nothing is flagged. `-inf` counts every regime's WAPE as improved. A NaN or infinite tolerance raises inside `Fraction`, but only after the replicate fits. An α at or below 0 flags nothing either (§18.3).
 
 5. **§11.14's gate has two scopes. FLAGGED FOR REVIEW.** `production` (`fit-state-model`) gates on every check:
    - divergences (0);
@@ -121,7 +122,7 @@ The brief leaves these open, or flags them for an explicit decision. Each gives 
      - persistence `persistence_max` · Beta(8, 2) = 0.95 · Beta(8, 2), prior mean 0.76 (reading 2 below);
      - innovation scale HalfNormal(0.1) with a log-scale dispersion HalfNormal(0.5);
      - the innovations' Student-t degrees of freedom fixed at 5 (§11.12). There is no observation scale (reading 1).
-     - Every scale and concentration must be positive and finite, the intercept's mean finite, and the degrees of freedom above 2, because eta's first month starts at a variance-matched scale. Each is refused at load, by name (§18.3).
+     - Every scale and concentration must be positive and finite, the slopes' `standardized_beta_sd` included. The intercept's mean must be finite, and the degrees of freedom above 2, because eta's first month starts at a variance-matched scale. No float anywhere in the `model:` block may be infinite or NaN, the gate's thresholds included: YAML reads `.inf` and `.nan` as floats. Each is refused at load, by name (§18.3).
    - The parameterization: a state with a training cell samples its level and its log innovation scale directly, and a state without one is non-centred (reading 3). Month and year effects are ZeroSumNormal, and eta starts at a variance-matched stationary scale.
    - Float64 is enabled at import, chains run `vectorized`, and the seed is `sum(map(ord, "logging-employment/state-total-model"))` = 3645.
 
@@ -226,7 +227,7 @@ The brief leaves these open, or flags them for an explicit decision. Each gives 
 |---|---|---|
 | `pyproject.toml`, `uv.lock` | 1 | five new dependencies; no locked version of an existing package moves |
 | `tests/unit/test_numpyro_api_probe.py`, `tests/unit/test_arviz_api_probe.py` | 1 | the JAX, NumPyro, ArviZ and xarray calls this plan builds on, run once in seconds |
-| `src/logging_employment/config.py` | 2, 12 | `StateModelPriors`, `StateModelDiagnostics`, `ModelConfig`, `Config.model`; `PromotionConfig`'s fourth key and, in Task 12, its docstring |
+| `src/logging_employment/config.py` | 2, 12 | `StateModelPriors`, `StateModelDiagnostics`, `ModelConfig`, `Config.model`; `PromotionConfig`'s fourth key and its thresholds' load-time ranges, and, in Task 12, its docstring |
 | `config.yaml` | 2 | the `model:` block and `promotion.catastrophic_stratum_coverage_alpha` |
 | `tests/unit/test_config_model_block.py`, `tests/unit/test_config.py`, `tests/unit/test_config_validation_block.py`, `tests/integration/test_stage4_acceptance.py` | 2, 12 | the block's refusals; the fence loads whole; both run-id pins; the tripwire |
 | `src/logging_employment/models/__init__.py`, `models/interfaces.py` | 3 | §16.2's `ModelData`, `StateModelConfig`, `StateModelFit`; `MODEL_ID`, `MODEL_VERSION`, `STORE_PATH` |
@@ -573,21 +574,22 @@ Both config additions land in this one task because both feed `resolved_dict`. S
 **Interfaces:**
 - Consumes: nothing from this plan.
 - Produces:
-  - `config.StateModelPriors`: 12 floats, as Decision 7 lists them. There is no observation scale (Decision 15), and `persistence_max` caps ρ. Every scale and concentration is `PositiveFinite` (positive and finite), the intercept's mean is finite, and `innovation_df` exceeds 2, each refused at load by name (§18.3);
-  - `config.StateModelDiagnostics`: `max_rhat: float = 1.01`, `min_ess_per_chain: int = 100`, `max_divergences: int = 0`, `min_ppc_coverage_90: float = 0.85`;
+  - `config.StateModelPriors`: 12 floats, as Decision 7 lists them. There is no observation scale (Decision 15), and `persistence_max` caps ρ. Every scale and concentration is `PositiveFinite` (positive and finite), the intercept's mean is a `FiniteFloat`, and `innovation_df` exceeds 2, each refused at load by name (§18.3);
+  - `config.StateModelDiagnostics`: `max_rhat: FiniteFloat = 1.01`, `min_ess_per_chain: int = 100`, `max_divergences: int = 0`, `min_ppc_coverage_90: float = 0.85` in [0, 1];
   - `config.ModelConfig`:
     - `backend: Literal["numpyro"]`;
     - `chains: int >= 2` (4), `warmup` (1000), `draws` (1000), `target_accept` in (0, 1) (0.9);
     - `state_dynamic: Literal["student_t_ar1"]`;
     - three `include_*` switches, each `Literal[False]`;
-    - `standardized_beta_sd` (0.5), `suppressed_variance_multipliers` ([1.0, 1.5, 2.0]), `seed` (3645);
+    - `standardized_beta_sd: PositiveFinite` (0.5), `suppressed_variance_multipliers: list[FiniteFloat]` ([1.0, 1.5, 2.0]), `seed` (3645);
     - `priors: StateModelPriors`, `diagnostics: StateModelDiagnostics`;
+    - no float in the block, `priors` and `diagnostics` included, may be infinite or NaN;
   - `Config.model: ModelConfig = ModelConfig()`;
-  - `PromotionConfig.catastrophic_stratum_coverage_alpha: float = 0.001`.
+  - `PromotionConfig.catastrophic_stratum_coverage_alpha: float = 0.001`, in (0, 1), and the three Appendix A thresholds as `FiniteFloat`, because this plan's record is their first reader (Decision 4).
 
 - [ ] **Step 1: Write the failing tests**
 
-`tests/unit/test_config_model_block.py` (new; 15 tests):
+`tests/unit/test_config_model_block.py` (new; 16 tests):
 
 ```python
 """Appendix A's `model:` block (§11) as `ModelConfig`: what it pins, accepts and refuses."""
@@ -659,13 +661,18 @@ BOUNDED_PRIORS = {"intercept_mean", "persistence_max", "innovation_df"}
 def test_every_prior_scale_and_concentration_must_be_positive_and_finite() -> None:
     """A non-positive or non-finite scale would reach NumPyro as an invalid distribution and fail
     as a backend error or a non-finite density, not as a refusal naming the value (§18.3). Read off
-    the model, not listed, so a prior added later is covered until someone decides otherwise."""
-    scales = sorted(set(StateModelPriors.model_fields) - BOUNDED_PRIORS)
-    assert len(scales) == 9
-    for name in scales:
+    the model, not listed, so a prior added later is covered until someone decides otherwise. The
+    slopes' scale is Appendix A's own key, so it sits at the block's top level, not in `priors`."""
+    scales = [
+        (StateModelPriors, name)
+        for name in sorted(set(StateModelPriors.model_fields) - BOUNDED_PRIORS)
+    ]
+    scales.append((ModelConfig, "standardized_beta_sd"))
+    assert len(scales) == 10
+    for model, name in scales:
         for value in (0.0, -1.0, math.inf, math.nan):
             with pytest.raises(ValidationError, match=name):
-                StateModelPriors.model_validate({name: value})
+                model.model_validate({name: value})
 
 
 def test_the_bounded_priors_refuse_values_outside_their_ranges() -> None:
@@ -686,6 +693,29 @@ def test_the_bounded_priors_refuse_values_outside_their_ranges() -> None:
         {"intercept_mean": -0.5, "persistence_max": 1.0, "innovation_df": 2.5}
     )
     assert (accepted.intercept_mean, accepted.persistence_max) == (-0.5, 1.0)
+
+
+def test_no_float_in_the_model_block_may_be_infinite_or_nan() -> None:
+    """YAML reads `.inf` and `.nan` as floats. A non-finite prior reaches NumPyro as an invalid
+    distribution. An infinite gate threshold passes its check on every fit, and a NaN one fails it
+    on every fit, but only after the fit has sampled. So each is refused at load, naming the field
+    (§18.3). Read off the three models, so a float added later is covered, and the count fails
+    first. `[nan, 1.0]` is the order `min()` lets past the multipliers' own check: it returns the
+    NaN, and `nan < 1.0` is false."""
+    floats = [
+        (model, name)
+        for model in (ModelConfig, StateModelPriors, StateModelDiagnostics)
+        for name, field in model.model_fields.items()
+        if field.annotation is float
+    ]
+    assert len(floats) == 16
+    for model, name in floats:
+        for value in (math.inf, -math.inf, math.nan):
+            with pytest.raises(ValidationError, match=name):
+                model.model_validate({name: value})
+    for multipliers in ([1.0, math.inf], [math.nan, 1.0]):
+        with pytest.raises(ValidationError, match="suppressed_variance_multipliers"):
+            ModelConfig.model_validate({"suppressed_variance_multipliers": multipliers})
 
 
 def test_a_misspelled_model_key_is_refused() -> None:
@@ -843,14 +873,20 @@ index dadcd51..6b08f0a 100644
 +    assert run_id(load_config(REPO_ROOT / "config.yaml"), {}) == "14352bb8e56e"
 ```
 
-`tests/unit/test_config_validation_block.py`: the fourth key joins `PROMOTION_KEYS`, which the unchanged tripwire watches, and gets its own value test (+1).
+`tests/unit/test_config_validation_block.py`: the fourth key joins `PROMOTION_KEYS`, which the unchanged tripwire watches, and gets its own value test, plus one that refuses a non-finite threshold or an α outside (0, 1) (+2).
 
 ```diff
 diff --git a/tests/unit/test_config_validation_block.py b/tests/unit/test_config_validation_block.py
-index 59d5ca1..bb1c4c7 100644
+index 59d5ca1..f909831 100644
 --- a/tests/unit/test_config_validation_block.py
 +++ b/tests/unit/test_config_validation_block.py
-@@ -34,11 +34,22 @@ def test_promotion_gates_carry_appendix_a_defaults():
+@@ -1,4 +1,5 @@
+ import ast
++import math
+ from pathlib import Path
+ 
+ import pytest
+@@ -34,11 +35,43 @@ def test_promotion_gates_carry_appendix_a_defaults():
      assert p.nominal_coverage_tolerance == 0.05
  
  
@@ -861,6 +897,27 @@ index 59d5ca1..bb1c4c7 100644
 +    probability 0.0122 (the plan's Decision 4).
 +    """
 +    assert PromotionConfig().catastrophic_stratum_coverage_alpha == 0.001
++
++
++def test_every_promotion_threshold_is_finite_and_the_alpha_is_a_probability():
++    """Plan 16's promotion record is the first code to read these, and a non-finite one breaks it
++    silently or late. A NaN degradation ceiling or alpha makes its comparison false, so the gate
++    stops flagging degraded divisions or catastrophic strata. `-inf` counts every regime's WAPE as
++    improved. A NaN or infinite tolerance raises inside `Fraction`, but only after the replicate
++    fits. So each is refused at load, naming the field (§18.3). Read off the model, so a threshold
++    added later is covered, and the count fails first. An alpha at or below 0 is the same silence
++    as a NaN one, because `cdf < alpha` can never hold."""
++    floats = [
++        name for name, field in PromotionConfig.model_fields.items() if field.annotation is float
++    ]
++    assert len(floats) == 4
++    for name in floats:
++        for value in (math.inf, -math.inf, math.nan):
++            with pytest.raises(ValidationError, match=name):
++                PromotionConfig.model_validate({name: value})
++    for alpha in (0.0, -0.1, 1.0):
++        with pytest.raises(ValidationError, match="catastrophic_stratum_coverage_alpha"):
++            PromotionConfig.model_validate({"catastrophic_stratum_coverage_alpha": alpha})
 +
 +
  PROMOTION_KEYS = frozenset(
@@ -919,10 +976,10 @@ ERROR tests/unit/test_config.py
 
 ```diff
 diff --git a/src/logging_employment/config.py b/src/logging_employment/config.py
-index 8dcd9b0..2c2d5d3 100644
+index 8dcd9b0..92d59f0 100644
 --- a/src/logging_employment/config.py
 +++ b/src/logging_employment/config.py
-@@ -5,7 +5,7 @@ from __future__ import annotations
+@@ -5,11 +5,11 @@ from __future__ import annotations
  import os
  import re
  from pathlib import Path
@@ -931,6 +988,11 @@ index 8dcd9b0..2c2d5d3 100644
  
  import yaml
  from dotenv import dotenv_values
+-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
++from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator, model_validator
+ 
+ _MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+ 
 @@ -109,9 +109,9 @@ class SourcesConfig(_Strict):
      `nonemployer`, `bea` -- carry `enabled: false` and belong to Stages 4-8; before they were
      declared here, `extra="forbid"` made the spec's own reference configuration unloadable, which
@@ -971,12 +1033,21 @@ index 8dcd9b0..2c2d5d3 100644
  
      NO EVALUATOR IS BUILT HERE, deliberately. A function whose primary argument is Stage 5's
      not-yet-designed output would fix that signature by guessing it, and three of §13.10's six
-@@ -319,6 +323,130 @@ class PromotionConfig(_Strict):
-     minimum_wape_improvement: float = 0.05
-     maximum_major_stratum_wape_degradation: float = 0.02
-     nominal_coverage_tolerance: float = 0.05
+@@ -316,9 +320,147 @@ class PromotionConfig(_Strict):
+     would not trip it; update this note by hand in that case.
+     """
+ 
+-    minimum_wape_improvement: float = 0.05
+-    maximum_major_stratum_wape_degradation: float = 0.02
+-    nominal_coverage_tolerance: float = 0.05
++    # Each threshold is finite at load (plan 16). The promotion record compares against each, and a
++    # NaN or infinite one either stops a gate flagging anything or fails only after the replicate
++    # fits. The alpha is also a probability: at or below 0, `cdf < alpha` can never hold.
++    minimum_wape_improvement: FiniteFloat = 0.05
++    maximum_major_stratum_wape_degradation: FiniteFloat = 0.02
++    nominal_coverage_tolerance: FiniteFloat = 0.05
 +    # Originated by plan 16. §13.10 says "does not fail catastrophically" and gives no number.
-+    catastrophic_stratum_coverage_alpha: float = 0.001
++    catastrophic_stratum_coverage_alpha: float = Field(default=0.001, gt=0.0, lt=1.0)
 +
 +
 +# A prior's scale or concentration. NumPyro would take a non-positive or non-finite one without
@@ -995,7 +1066,8 @@ index 8dcd9b0..2c2d5d3 100644
 +    there. The innovations' Student-t degrees of freedom are fixed at 5, §11.12's "fixed near 5 for
 +    the first implementation".
 +
-+    EVERY PRIOR IS CHECKED AT LOAD. Scales and concentrations are positive and finite
++    EVERY PRIOR IS CHECKED AT LOAD, the slopes' scale included, which sits at the block's top level
++    as Appendix A's own `standardized_beta_sd`. Scales and concentrations are positive and finite
 +    (`PositiveFinite`), the intercept's mean is finite, and the degrees of freedom exceed 2: eta's
 +    first month starts at the variance-matched scale sigma / sqrt(1 - rho^2), which needs the
 +    innovations to have a variance.
@@ -1010,7 +1082,7 @@ index 8dcd9b0..2c2d5d3 100644
 +    degrees of freedom are not parameters of the model.
 +    """
 +
-+    intercept_mean: float = Field(default=1.5, allow_inf_nan=False)
++    intercept_mean: FiniteFloat = 1.5
 +    intercept_sd: PositiveFinite = 1.0
 +    state_scale_sd: PositiveFinite = 0.5
 +    region_scale_sd: PositiveFinite = 0.5
@@ -1036,12 +1108,16 @@ index 8dcd9b0..2c2d5d3 100644
 +    data's month-to-month moves, which widens intervals without understating them, while a fit
 +    that misses more than 15% of its training cells' moves understates them. `max_divergences` is 0
 +    because §11.14 says "no unresolved divergent transitions".
++
++    THE THRESHOLDS ARE FINITE AT LOAD. An infinite `max_rhat` would pass every fit's R-hat check,
++    and a NaN one would fail every fit, but only after it had sampled. `min_ppc_coverage_90` is a
++    share, so it lies in [0, 1].
 +    """
 +
-+    max_rhat: float = 1.01
++    max_rhat: FiniteFloat = 1.01
 +    min_ess_per_chain: int = 100
 +    max_divergences: int = 0
-+    min_ppc_coverage_90: float = 0.85
++    min_ppc_coverage_90: float = Field(default=0.85, ge=0.0, le=1.0)
 +
 +
 +class ModelConfig(_Strict):
@@ -1056,6 +1132,10 @@ index 8dcd9b0..2c2d5d3 100644
 +    Appendix A's eleven keys are declared verbatim, and each default is Appendix A's value. Three
 +    are originated here: `seed`, `priors` (§11.12) and `diagnostics` (§11.14).
 +
++    EVERY FLOAT IN THE BLOCK IS FINITE AT LOAD, because YAML reads `.inf` and `.nan` as floats and
++    a plain `float` admits both. `standardized_beta_sd` is both slopes' prior scale, so it is
++    `PositiveFinite`, as the scales in `priors` are.
++
 +    THE THREE `include_*` SWITCHES ARE `Literal[False]`, refused at load like an inactive source.
 +    Nothing implements them. §11.2's change points "MAY be added only if validation shows material
 +    gains". §11.4's harvest factor and §11.11's CES row are Stage 7's. Accepting `true` would
@@ -1066,8 +1146,10 @@ index 8dcd9b0..2c2d5d3 100644
 +
 +    `suppressed_variance_multipliers` is §11.13's sensitivity list. This stage fits the 1.0 model
 +    only, and the other values are Stage 7's sensitivity runs, so the validator requires 1.0 to be
-+    present and refuses a multiplier below 1.0 or a repeated one. The key is otherwise inert here,
-+    and that is recorded rather than hidden: `models/state_total.py` never reads it.
++    present and refuses a multiplier below 1.0 or a repeated one. Each multiplier is a
++    `FiniteFloat` because that check cannot see a NaN: `min()` returns a leading one, and
++    `nan < 1.0` is false. The key is otherwise inert here, and that is recorded rather than hidden:
++    `models/state_total.py` never reads it.
 +
 +    `seed` is `sum(map(ord, "logging-employment/state-total-model"))`, a descriptive seed rather
 +    than a bare constant. It is in the run id because a different seed writes different draws.
@@ -1082,8 +1164,8 @@ index 8dcd9b0..2c2d5d3 100644
 +    include_change_points: Literal[False] = False
 +    include_harvest_factor: Literal[False] = False
 +    include_ces: Literal[False] = False
-+    standardized_beta_sd: float = Field(default=0.5, gt=0.0)
-+    suppressed_variance_multipliers: list[float] = [1.0, 1.5, 2.0]
++    standardized_beta_sd: PositiveFinite = 0.5
++    suppressed_variance_multipliers: list[FiniteFloat] = [1.0, 1.5, 2.0]
 +    seed: int = 3645
 +    priors: StateModelPriors = StateModelPriors()
 +    diagnostics: StateModelDiagnostics = StateModelDiagnostics()
@@ -1102,7 +1184,7 @@ index 8dcd9b0..2c2d5d3 100644
  
  
  class Config(_Strict):
-@@ -331,6 +459,7 @@ class Config(_Strict):
+@@ -331,6 +473,7 @@ class Config(_Strict):
      reconciliation: ReconciliationConfig
      baselines: BaselinesConfig
      disclosure: DisclosureConfig
@@ -1189,7 +1271,7 @@ index 45791f6..bab0217 100644
 
 Run: the Step 2 command.
 
-Expected: every test passes. Observed without `data/`: `55 passed, 2 skipped`. With `data/` linked, the moved pin in `test_stage4_acceptance.py` runs too.
+Expected: every test passes. Observed without `data/`: `57 passed, 2 skipped`. With `data/` linked, the moved pin in `test_stage4_acceptance.py` runs too.
 
 - [ ] **Step 5: Read both ids back, the canary and the pin**
 
@@ -1207,7 +1289,7 @@ uv run ruff format --check src tests && uv run ruff check src tests && uv run in
 uv run pytest -q -p no:cacheprovider -m "not slow"
 ```
 
-Expected: gates clean. Non-slow suite: Task 1's count **+ 16 passed** (15 new here, 1 new in `test_config_validation_block.py`; `test_config.py` renames two and adds none).
+Expected: gates clean. Non-slow suite: Task 1's count **+ 18 passed** (16 new here, 2 new in `test_config_validation_block.py`; `test_config.py` renames two and adds none).
 
 - [ ] **Step 7: Commit**
 
@@ -7452,7 +7534,7 @@ E                                    'minimum_wape_improvement',
 E                                    'nominal_coverage_tolerance']}
 E         Use -v to get more diff
 FAILED tests/unit/test_config_validation_block.py::test_the_promotion_keys_are_still_unread_and_the_docstring_still_says_so
-1 failed, 5 passed
+1 failed, 6 passed
 ```
 
 - [ ] **Step 5: Convert the tripwire, and rewrite the docstring it guards**
@@ -7463,10 +7545,10 @@ The test is converted, not deleted. It now pins `validate/promotion.py` as the O
 
 ```diff
 diff --git a/tests/unit/test_config_validation_block.py b/tests/unit/test_config_validation_block.py
-index bb1c4c7..ee8dda8 100644
+index f909831..43a06d7 100644
 --- a/tests/unit/test_config_validation_block.py
 +++ b/tests/unit/test_config_validation_block.py
-@@ -116,16 +116,16 @@ def test_the_tripwire_detector_sees_reads_and_ignores_mentions():
+@@ -138,16 +138,16 @@ def test_the_tripwire_detector_sees_reads_and_ignores_mentions():
      assert _named_keys("gate(**cfg.promotion.model_dump())") == set()
  
  
@@ -7493,7 +7575,7 @@ index bb1c4c7..ee8dda8 100644
      """
      src = Path(__file__).resolve().parents[2] / "src" / "logging_employment"
      readers = {
-@@ -133,4 +133,6 @@ def test_the_promotion_keys_are_still_unread_and_the_docstring_still_says_so():
+@@ -155,4 +155,6 @@ def test_the_promotion_keys_are_still_unread_and_the_docstring_still_says_so():
          for path in sorted(src.rglob("*.py"))
          if (named := _named_keys(path.read_text(encoding="utf-8")))
      }
@@ -7507,7 +7589,7 @@ index bb1c4c7..ee8dda8 100644
 
 ```diff
 diff --git a/src/logging_employment/config.py b/src/logging_employment/config.py
-index 2c2d5d3..f89a0ff 100644
+index 92d59f0..78105f8 100644
 --- a/src/logging_employment/config.py
 +++ b/src/logging_employment/config.py
 @@ -287,35 +287,23 @@ class ValidationConfig(_Strict):
@@ -8041,7 +8123,9 @@ about to change before you change it.
 - Non-centred only where no training cell pins a state: a trained state samples its level and its
   log innovation scale directly (Decision 15). Month and year effects are ZeroSumNormal. Persistence
   is 0.95 * Beta(8, 2), prior mean 0.76, where §11.12 says "centered near 0.8" (flagged, Decision 7).
-  Every prior is a `config.StateModelPriors` field, so it is in `resolved_dict` and in `run_id`.
+  Every prior is a config field, so it is in `resolved_dict` and in `run_id`: the slopes' scale is
+  `ModelConfig.standardized_beta_sd`, Appendix A's own key, and the rest are `StateModelPriors`.
+  No float in the `model:` block may be infinite or NaN, and each is refused at load, by name.
 
 ## The gate and its two scopes
 
@@ -8096,7 +8180,7 @@ while plan 16 was written, and its docstrings give the arithmetic behind each on
 
 ````diff
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 8d85cbe..310b952 100644
+index 8d85cbe..836f807 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -6,12 +6,13 @@
@@ -8110,8 +8194,8 @@ index 8d85cbe..310b952 100644
 -# which skip without data/, and no test carries `network`: the expression removes nothing that
 -# would have run today. It keeps a future slow or live-endpoint test out of this tier instead.
 +# `-m "not slow and not network"` states the policy the markers declare. Measured at plan 16's
-+# Task 14 without data/ on the author's Mac: the bare run gives 1636 passed, 72 skipped; this one
-+# 1615 passed, 45 skipped, 48 deselected. A runner reports one more skip: one audit test skips
++# Task 14 without data/ on the author's Mac: the bare run gives 1638 passed, 72 skipped; this one
++# 1617 passed, 45 skipped, 48 deselected. A runner reports one more skip: one audit test skips
 +# without a personal file outside the repo (D-055). Of the 48 deselected, 27 are data-bound and
 +# would skip here anyway. The other 21 are plan 16's slow state-total model tests, which need no
 +# data/ and WOULD run: the expression keeps their minutes of NUTS sampling out of this tier on
@@ -8120,7 +8204,7 @@ index 8d85cbe..310b952 100644
  
  on:
 diff --git a/CLAUDE.md b/CLAUDE.md
-index af0104e..444723b 100644
+index af0104e..aef4535 100644
 --- a/CLAUDE.md
 +++ b/CLAUDE.md
 @@ -3,8 +3,10 @@
@@ -8186,7 +8270,7 @@ index af0104e..444723b 100644
 +`data/` lives. Since plan 16 the expression DOES remove tests that would have run: the 21 slow
 +model tests (5 in `test_cli_state_model.py`, 6 in `test_cli_validate_state_model.py`, 10 in
 +`test_state_total_recovery.py`) need no `data/`, only minutes of NUTS. Collected at plan 16's
-+Task 14 without `data/`: a bare run is 1636 passed, 72 skipped; the hermetic tier 1615 passed, 45
++Task 14 without `data/`: a bare run is 1638 passed, 72 skipped; the hermetic tier 1617 passed, 45
 +skipped, 48 deselected (27 data-bound, 21 slow model tests). Those counts are THIS MAC's: on
 +ubuntu-latest one more test skips (1407 passed, 46 skipped, 27 deselected before plan 16, run
 +34765933053), because
@@ -8445,7 +8529,7 @@ Expected: `13`. That is one unit test, plus eight integration modules, with `tes
 uv run pytest -q -p no:cacheprovider
 ```
 
-Expected: Task 0's bare count **+ 138 passed**, 0 failed, skipped unchanged. Most of the run is Task 0's slow D1 tests, about 12 minutes. Task 10 took 34 s when observed. Tasks 9 and 13 add their store tests, which never ran while this plan was written. Their fixtures fit at 2 chains of 60 warmup and 60 draws, and the three of their slow tests that did run took 29 s together, so expect minutes, not tens of minutes.
+Expected: Task 0's bare count **+ 140 passed**, 0 failed, skipped unchanged. Most of the run is Task 0's slow D1 tests, about 12 minutes. Task 10 took 34 s when observed. Tasks 9 and 13 add their store tests, which never ran while this plan was written. Their fixtures fit at 2 chains of 60 warmup and 60 draws, and the three of their slow tests that did run took 29 s together, so expect minutes, not tens of minutes.
 
 - [ ] **Step 5: Measure the two counts the guides quote, without `data/`**
 
@@ -8458,7 +8542,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow and not network"
 mv data.unlinked data && ls data/staged
 ```
 
-Expected: `1636 passed, 72 skipped` for the bare run, and `1615 passed, 45 skipped, 48 deselected` for the CI expression. Those are the numbers Step 2 wrote into `CLAUDE.md` and `ci.yml`. **If either differs, write the measured numbers into both files, and report the difference in the Task 15 log entry.** Never adjust a test to meet a written count. The arithmetic is the check: skipped stays at 72 and 45, because every test this plan adds runs without `data/`.
+Expected: `1638 passed, 72 skipped` for the bare run, and `1617 passed, 45 skipped, 48 deselected` for the CI expression. Those are the numbers Step 2 wrote into `CLAUDE.md` and `ci.yml`. **If either differs, write the measured numbers into both files, and report the difference in the Task 15 log entry.** Never adjust a test to meet a written count. The arithmetic is the check: skipped stays at 72 and 45, because every test this plan adds runs without `data/`.
 
 - [ ] **Step 6: Gates**
 
