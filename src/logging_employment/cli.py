@@ -382,6 +382,159 @@ def run_baselines_command(
             typer.echo(f"declined {estimator_id} {kind} {count}")
 
 
+@app.command("fit-state-model")
+def fit_state_model_command(
+    config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
+) -> None:
+    """Fit §11's state-total model, reconcile every draw, gate it (§11.14) and summarise it (§7.11).
+
+    Preconditions are `build-constraints` and `solve-bounds`: every draw is reconciled into §9's
+    per-cell interval, so a run without `deterministic_bounds.parquet` has nothing to hold the draws
+    to. A RE-FIT REPLACES, NEVER MERGES. The previous fit's artifacts are deleted before sampling,
+    so a failed gate cannot leave an earlier success's summary beside its own failed report.
+    `run_id` does not cover source code, so a re-fit with new code lands in the same directory.
+
+    `posterior/diagnostics.json` is written BEFORE the gate is enforced, so a failure keeps its
+    evidence. The command then exits 1 and writes no store, no summary and no manifest.
+    `validate-state-model` reads the report and records the model as not beaten without scoring it.
+    The report names the constraint set the draws were reconciled against, and both commands that
+    read a fit compare it with the run's own first (`_stale_fit`).
+    """
+    import json
+    import shutil
+
+    import polars as pl
+
+    from .baselines.runner import state_total_bounds
+    from .build import write_parquet_deterministic
+    from .contracts import POSTERIOR_SUMMARY_SCHEMA, HarmonizedData, schema_fingerprint
+    from .errors import ModelDiagnosticsError
+    from .models.arviz_io import write_store
+    from .models.data import build_model_data
+    from .models.diagnostics import assert_gate_passes, evaluate_gate
+    from .models.interfaces import MODEL_ID, MODEL_VERSION, STORE_PATH, StateModelConfig
+    from .models.reconciliation import check_reconciled, reconcile_fit
+    from .models.state_total import fit_state_total_model
+    from .models.summary import posterior_summary
+    from .runs import run_dir, run_id
+
+    cfg = load_config(config)
+    data = HarmonizedData.load(Path(cfg.storage.staged_uri))
+    rid = run_id(cfg, _input_digests(cfg))
+    run = run_dir(cfg, rid)
+    manifest_path = run / "schema_manifest.json"
+    bounds_path = run / "deterministic_bounds.parquet"
+    for path, command in ((manifest_path, "build-constraints"), (bounds_path, "solve-bounds")):
+        if not path.exists():
+            raise typer.BadParameter(
+                f"{path} is missing: every draw is reconciled into this run's deterministic "
+                f"bounds (INV-012), and no run matches the staged inputs. Run `{command}` first"
+            )
+    # THE BOUNDS MUST BE THIS CONSTRAINT SET'S. `run_id` does not cover code, so `build-constraints`
+    # can re-run under the same id after a code change and leave the old `deterministic_bounds`
+    # beside a new `schema_manifest.json`. `constraint_set_hash` is the one cross-stage check that
+    # fires (CLAUDE.md), and it runs before anything is deleted, so a refusal keeps the last fit.
+    # That fit is then stale, and `_stale_fit` keeps `reconcile` and `validate-state-model` off it.
+    constraint_set_hash = json.loads(manifest_path.read_text())["constraint_set_hash"]
+    bounds = pl.read_parquet(bounds_path)
+    solved_against = sorted(set(bounds["constraint_set_hash"].to_list()))
+    if solved_against != [constraint_set_hash]:
+        raise typer.BadParameter(
+            f"{bounds_path} was solved against constraint set {solved_against}, but "
+            f"{manifest_path} names {constraint_set_hash!r}: `build-constraints` ran after "
+            "`solve-bounds`. Run `solve-bounds` first"
+        )
+    posterior = run / "posterior"
+    shutil.rmtree(posterior, ignore_errors=True)
+    for stale in (run / "posterior_summary.parquet", run / "state_model_manifest.json"):
+        stale.unlink(missing_ok=True)
+    posterior.mkdir(parents=True)
+
+    monthly = data.qcew_monthly
+    model_data = build_model_data(monthly)
+    fit = fit_state_total_model(model_data, StateModelConfig.from_config(cfg.model))
+    draws = reconcile_fit(fit, monthly, state_total_bounds(bounds), cfg)
+    check = check_reconciled(draws, tolerance=cfg.reconciliation.tolerance)
+    report = evaluate_gate(fit, draws, check, cfg.model.diagnostics, scope="production")
+    _write_manifest(
+        posterior / "diagnostics.json",
+        {**report.to_json(), "run_id": rid, "constraint_set_hash": constraint_set_hash},
+    )
+    try:
+        assert_gate_passes(report)
+    except ModelDiagnosticsError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+
+    attrs = {
+        "run_id": rid,
+        "model_id": MODEL_ID,
+        "model_version": MODEL_VERSION,
+        "constraint_set_hash": constraint_set_hash,
+    }
+    digest = write_store(run / STORE_PATH, draws, fit, model_data, attrs=attrs)
+    summary = posterior_summary(
+        draws, monthly, bounds, run_id=rid, constraint_set_hash=constraint_set_hash
+    )
+    _write_manifest(
+        run / "state_model_manifest.json",
+        {
+            **attrs,
+            "sampler": fit.sampler,
+            "draws_sha256": digest,
+            "store": STORE_PATH,
+            "posterior_summary_sha256": write_parquet_deterministic(
+                summary, run / "posterior_summary.parquet"
+            ),
+            "posterior_summary_schema": schema_fingerprint(POSTERIOR_SUMMARY_SCHEMA),
+            # §12.2 (since `D-120`): every row allocated against R_t carries its anchor basis.
+            # §7.11's table has no such column, so the fit's manifest and the store carry it.
+            "anchor_bases": sorted({anchor.anchor_basis for anchor in draws.anchors.values()}),
+            "training_cells": int(model_data.train_y.size),
+            "predicted_cells": len(model_data.predict_cell_ids),
+            "ppc_coverage_90": fit.ppc_coverage_90,
+            "ppc_cells": fit.ppc_cells,
+            "posterior_medians": fit.posterior_medians,
+            "reconciliation": {
+                "draws_checked": check.draws_checked,
+                "months_checked": check.months_checked,
+                "max_anchor_drift": check.max_anchor_drift,
+                "bound_violations": check.bound_violations,
+                "tolerance": check.tolerance,
+            },
+        },
+    )
+    typer.echo(f"fit {fit.chains} chains; gate passed; {len(draws.cell_ids)} cells reconciled")
+
+
+def _stale_fit(run: Path) -> dict[str, str | None] | None:
+    """The fit's and the run's constraint-set hashes when they differ, or `None` when they agree.
+
+    A fit can outlive its constraint set. `fit-state-model` refuses stale bounds before it deletes
+    anything, so that refusal keeps the last fit, and `build-constraints` can re-run under the same
+    `run_id` without `fit-state-model` ever running again. Either way the surviving draws were
+    reconciled into bounds that no longer hold, and re-verifying them against themselves would
+    pass. So `reconcile` and `validate-state-model`, the two commands that read a fit, call this
+    first. Deleting the fit on refusal would close only the first of those two routes.
+
+    The fit's hash is `posterior/diagnostics.json`'s. Every fit writes that report first, gate
+    passed or not, into the `posterior/` it emptied, so the report and the store come from one fit,
+    and reading it needs no netCDF reader. An absent report or key is `None`, which matches
+    nothing: an unrecorded fit is refused, never trusted.
+    """
+    import json
+
+    def recorded(path: Path) -> str | None:
+        """The `constraint_set_hash` a JSON artifact records, or `None` without the file or key."""
+        return json.loads(path.read_text()).get("constraint_set_hash") if path.exists() else None
+
+    fit = recorded(run / "posterior" / "diagnostics.json")
+    current = recorded(run / "schema_manifest.json")
+    if fit is not None and fit == current:
+        return None
+    return {"fit_constraint_set_hash": fit, "constraint_set_hash": current}
+
+
 @app.command("reconcile")
 def reconcile_command(
     config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
@@ -419,19 +572,57 @@ def reconcile_command(
     # §16.1: "Every command MUST write a machine-readable manifest and MUST be idempotent for the
     # same inputs." A verifier that only echoes leaves nothing for §18.1 to reproduce against, so
     # the verdict and the digest of what was checked are persisted beside the results.
-    _write_manifest(
-        run / "reconcile_manifest.json",
-        {
-            "checked_pairs": drift.height,
-            "max_residual_drift": worst,
-            "tolerance": cfg.reconciliation.tolerance,
-            "within_tolerance": within_tolerance,
-            "baseline_results_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-        },
-    )
+    payload: dict[str, object] = {
+        "checked_pairs": drift.height,
+        "max_residual_drift": worst,
+        "tolerance": cfg.reconciliation.tolerance,
+        "within_tolerance": within_tolerance,
+        "baseline_results_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+    # Plan 16: INV-012 re-measured on the PERSISTED draws once `fit-state-model` has written them.
+    # `fit-state-model` checked the draws it held in memory; this reads the file back, so a defect
+    # in writing it cannot pass unseen. The key is OMITTED, never null, before a fit exists, so a
+    # baseline-only run writes the keys it always wrote. A fit from another constraint set fails
+    # unread: its draws hold to that set's bounds, so checking them would pass (`_stale_fit`).
+    from .models.interfaces import STORE_PATH
+
+    state_model_passed = True
+    store = run / STORE_PATH
+    stale = _stale_fit(run) if store.exists() else None
+    if stale is not None:
+        state_model_passed = False
+        payload["state_model"] = {**stale, "passed": False}
+        typer.echo(
+            "state-total draws not checked: the fit was reconciled against constraint set "
+            f"{stale['fit_constraint_set_hash']!r}, and this run's is "
+            f"{stale['constraint_set_hash']!r}. Run `solve-bounds` and `fit-state-model` first",
+            err=True,
+        )
+    elif store.exists():
+        from .models.arviz_io import draws_digest, read_store, store_digest
+        from .models.reconciliation import check_reconciled
+
+        draws = read_store(store)
+        check = check_reconciled(draws, tolerance=cfg.reconciliation.tolerance)
+        digest_matches = draws_digest(draws) == store_digest(store)
+        state_model_passed = check.passed and digest_matches
+        payload["state_model"] = {
+            "draws_checked": check.draws_checked,
+            "months_checked": check.months_checked,
+            "cells_checked": check.cells_checked,
+            "max_anchor_drift": check.max_anchor_drift,
+            "bound_violations": check.bound_violations,
+            "draws_sha256_matches": digest_matches,
+            "passed": state_model_passed,
+        }
+        typer.echo(
+            f"state-total draws: {check.draws_checked} x {check.cells_checked}, max anchor drift "
+            f"{check.max_anchor_drift:.3e}, {check.bound_violations} bound violation(s)"
+        )
+    _write_manifest(run / "reconcile_manifest.json", payload)
     typer.echo(f"checked {drift.height} (estimator, month) pairs")
     typer.echo(f"max residual drift {worst:.3e}")
-    if not within_tolerance:
+    if not within_tolerance or not state_model_passed:
         raise typer.Exit(code=1)
 
 
