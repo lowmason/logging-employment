@@ -28,7 +28,7 @@ import polars as pl
 
 from ..config import ConstraintsConfig
 from ..contracts import DETERMINISTIC_BOUNDS_SCHEMA
-from ..errors import InfeasibleComponentError, SolverError
+from ..errors import InfeasibleComponentError, SolverError, SolverOptionError
 from .graph import assign_components, component_membership
 from .index import SystemIndex, build_index
 from .rank import rank_table
@@ -183,13 +183,33 @@ def configured_highs(config: BoundConfig) -> highspy.Highs:
     `use_milp_when_lp_interval_width_below`, where a one-employee miss is a relative gap of at least
     1/25, so the default could not have bound on them; the option is set for the engine, not for
     that case.
+
+    Every option's answer is read (`D-126`), and anything but `kOk` raises `SolverOptionError`,
+    whose docstring says what an unread refusal cost. Not only `kError`: `kOk` is the one answer
+    that says the value was taken, and an answer this code does not recognise is no evidence that
+    it was. Measured 2026-09-27 (highspy 1.15.1): each tolerance refuses 1e-11 and keeps its
+    default, 1e-7 for primal and dual and 1e-6 for mip. That 1e-10 floor is HiGHS's, not the
+    spec's, so it is enforced here, at the solver, rather than in `ConstraintsConfig`. Nor is this
+    a finiteness check: HiGHS answers `kOk` to inf, which its range admits, and to NaN, which its
+    range test cannot see, so those must be refused where the config is loaded. `output_flag` goes
+    first so a refusal surfaces only as the exception; with output on, HiGHS also prints its own
+    error line.
     """
     model = highspy.Highs()
-    model.setOptionValue("output_flag", False)
-    model.setOptionValue("primal_feasibility_tolerance", config.feasibility_tolerance)
-    model.setOptionValue("dual_feasibility_tolerance", config.feasibility_tolerance)
-    model.setOptionValue("mip_feasibility_tolerance", config.feasibility_tolerance)
-    model.setOptionValue("mip_rel_gap", 0.0)
+    for option, value in (
+        ("output_flag", False),
+        ("primal_feasibility_tolerance", config.feasibility_tolerance),
+        ("dual_feasibility_tolerance", config.feasibility_tolerance),
+        ("mip_feasibility_tolerance", config.feasibility_tolerance),
+        ("mip_rel_gap", 0.0),
+    ):
+        status = model.setOptionValue(option, value)
+        if status != highspy.HighsStatus.kOk:
+            _, held = model.getOptionValue(option)
+            raise SolverOptionError(
+                f"HiGHS answered {status} to {option} = {value!r} and holds {held!r}; only kOk "
+                "says the value was taken, so nothing is solved under it"
+            )
     return model
 
 

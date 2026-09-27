@@ -2531,3 +2531,34 @@ changed and did not. `D-125` is an older promise the finding leans on, that a re
       Size: design. Done when: either a refused `run-baselines` leaves an `anchor_audit.parquet` holding
       the refused month, with a test that makes the gate refuse and reads the file back, or both texts
       say the audit is written only on a pass; and the `_national_row` break is settled the same way.
+
+## HiGHS option refusal — 2026-09-27
+
+Filed after its fix had landed, so this item was never open. The defect was measured on 2026-09-27
+beside the change that refuses non-finite `ConstraintsConfig` floats at load; that change
+deliberately kept HiGHS's option range out of the config, and this fix enforces the range at the
+solver instead.
+
+- [x] `D-126` **`configured_highs` never read HiGHS's answer to an option, so a refused tolerance
+      solved every bound at HiGHS's default.** `constraints/bounds.py::configured_highs` set five
+      options through `setOptionValue` and discarded every returned `HighsStatus`. HiGHS does not
+      raise on a value outside an option's range: it answers `kError` and keeps the value it held.
+      Measured with highspy 1.15.1, a `feasibility_tolerance` of 1e-11 is refused for all three
+      tolerances, which stay at 1e-7 (primal, dual) and 1e-6 (mip), while 1e-10 is taken. Every
+      bound then solved at HiGHS's default while `deterministic_bounds` recorded 1e-11 as
+      `solver_tolerance`, and `classify_bound_status`, `baselines.runner.integer_bounds` and
+      `validate.recover.assert_truth_within_bounds` applied that recorded value to bounds solved at
+      another. `constraints/diagnostics.py::diagnose` builds both of its solvers through the same
+      constructor (`D-099`), so the §9.7 diagnosis shared the defect. 1e-11 is positive and finite,
+      so no config check refuses it, and none should: 1e-10 is HiGHS's floor, not a fact the spec
+      states. Non-finite values are outside this item: HiGHS answers `kOk` to NaN and to inf, so
+      they have to be refused where the config loads.
+      Size: quick-fix. Done when: `configured_highs` raises a named `LoggingEmploymentError` on any
+      option HiGHS does not answer `kOk`, and tests show a config-valid tolerance HiGHS refuses
+      halting both `solve_bounds` and `diagnose`.
+      → done 2026-09-27 (fixed before filing): `c30f131` reads the answer to all five options and
+      raises the new `errors.SolverOptionError` on anything but `kOk`, naming the option, the value
+      asked for and the value HiGHS holds. It adds four test functions, one parametrized over
+      `kError` and `kWarning`; a stub refuses each option `configured_highs` sets, in turn, so an
+      option set without its answer read fails. The suite without `data/` went from 1498 to 1503
+      passed, 72 skipped.
