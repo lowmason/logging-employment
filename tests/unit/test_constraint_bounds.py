@@ -13,7 +13,7 @@ import pytest
 from logging_employment.config import load_config
 from logging_employment.constraints import bounds, cells, graph, rows, system
 from logging_employment.contracts import HarmonizedData
-from logging_employment.errors import InfeasibleComponentError
+from logging_employment.errors import InfeasibleComponentError, SolverOptionError
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -302,6 +302,81 @@ def test_a_milp_minimum_is_the_true_optimum_not_one_inside_the_default_gap() -> 
     model.run()
     assert model.getModelStatus() == highspy.HighsModelStatus.kOptimal
     assert model.getInfo().objective_function_value == pytest.approx(30526.0, abs=1e-6)
+
+
+def test_a_tolerance_highs_refuses_halts_rather_than_solving_at_the_highs_default() -> None:
+    """HiGHS answers `kError` to a tolerance outside its option range and KEEPS ITS OWN DEFAULT.
+
+    Measured 2026-09-27, highspy 1.15.1: 1e-11 is refused for all three tolerances, which stay at
+    1e-7 (primal, dual) and 1e-6 (mip), while 1e-10 is taken. 1e-11 is positive and finite, so no
+    config check refuses it, and none should: 1e-10 is HiGHS's floor, not a fact the spec states.
+    Unread, the refusal ran every bound at 1e-7 while `solver_tolerance` recorded 1e-11. The
+    message carries the value HiGHS kept, because that is the tolerance a solve would have run at.
+    """
+    tight = load_config(REPO / "config.yaml").constraints.model_copy(
+        update={"feasibility_tolerance": 1e-11}
+    )
+    with pytest.raises(SolverOptionError) as refused:
+        bounds.configured_highs(tight)
+    message = str(refused.value)
+    assert "primal_feasibility_tolerance" in message
+    assert "1e-11" in message
+    assert "1e-07" in message
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [highspy.HighsStatus.kError, highspy.HighsStatus.kWarning],
+    ids=["kError", "kWarning"],
+)
+def test_every_option_the_engine_gives_highs_has_its_answer_read(monkeypatch, answer) -> None:
+    """`output_flag` and `mip_rel_gap` are constants HiGHS takes today, so no config can make it
+    refuse them and only a stub can show their answers are read. The stub records which options
+    `configured_highs` sets and then refuses each in turn, rather than this test listing them: a
+    sixth option set without its answer read fails here instead of passing unexamined.
+
+    `kWarning` is here because `configured_highs` treats every answer but `kOk` as a refusal, and a
+    check narrowed to `== kError` would otherwise pass this test while its docstring went false.
+    """
+    config = load_config(REPO / "config.yaml").constraints
+    seen: list[str] = []
+    refused: str | None = None
+
+    class Stub(highspy.Highs):
+        """Real HiGHS, except that it records every option set and gives one a non-`kOk` answer."""
+
+        def setOptionValue(self, option, value):
+            seen.append(option)
+            if option == refused:
+                return answer
+            return super().setOptionValue(option, value)
+
+    monkeypatch.setattr(highspy, "Highs", Stub)
+    bounds.configured_highs(config)
+    options = list(seen)
+    assert set(options) >= {
+        "output_flag",
+        "primal_feasibility_tolerance",
+        "dual_feasibility_tolerance",
+        "mip_feasibility_tolerance",
+        "mip_rel_gap",
+    }
+    for option in options:
+        refused = option
+        with pytest.raises(SolverOptionError, match=option):
+            bounds.configured_highs(config)
+
+
+def test_no_bound_table_records_a_tolerance_highs_refused(make_monthly, make_size) -> None:
+    """`solver_tolerance` is only ever a value HiGHS took. `solve_bounds` catches
+    `InfeasibleComponentError` alone, so a refused option halts even with every component
+    quarantined: quarantine is permission to continue past an infeasibility, not past a solver
+    running at a tolerance the table does not record."""
+    built, cfg = _built(make_monthly(_national("2024-03", 41668, 7713)), make_size(*_REAL_2024))
+    tight = cfg.constraints.model_copy(update={"feasibility_tolerance": 1e-11})
+    every = graph.component_membership(built)["component_id"].to_list()
+    with pytest.raises(SolverOptionError):
+        bounds.solve_bounds(built, tight, quarantined=every)
 
 
 def _parent_bounded(make_monthly, make_size, parent_value: int):

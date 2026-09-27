@@ -10,7 +10,7 @@ import pytest
 from logging_employment.config import load_config
 from logging_employment.constraints import bounds, diagnostics, graph, system
 from logging_employment.contracts import HarmonizedData
-from logging_employment.errors import InfeasibleComponentError
+from logging_employment.errors import InfeasibleComponentError, SolverOptionError
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -164,3 +164,15 @@ def test_the_diagnostic_judges_feasibility_at_the_configured_tolerance(
     report = diagnostics.diagnose(built, component, membership, loose)
     assert report.minimum_slack == 0.0
     assert report.iis_constraint_ids == ()
+
+
+def test_the_diagnostic_inherits_the_refusal_of_a_tolerance_highs_will_not_take(
+    make_monthly, make_size
+) -> None:
+    """`diagnose` builds both of its solvers through `bounds.configured_highs` (D-099), so it halts
+    on a tolerance HiGHS refuses instead of diagnosing, at HiGHS's own default, a component the
+    bound solver was told to judge at another tolerance."""
+    built, membership, component, cfg = _infeasible(make_monthly, make_size)
+    tight = cfg.constraints.model_copy(update={"feasibility_tolerance": 1e-11})
+    with pytest.raises(SolverOptionError, match="primal_feasibility_tolerance"):
+        diagnostics.diagnose(built, component, membership, tight)
