@@ -144,13 +144,32 @@ class ConstraintsConfig(_Strict):
     `use_milp_when_lp_interval_width_below` is a *performance* switch: it decides when an integer
     re-solve is worth its cost, never whether a cell is disclosive. The disclosure thresholds live
     in `DisclosureConfig` and are a governance decision (§21).
+
+    ALL THREE FLOATS REFUSE NaN AND ±inf AT LOAD (`allow_inf_nan=False`): no reader refuses one.
+    HiGHS takes a NaN or +inf feasibility tolerance and answers `kOk` (measured 2026-09-27, on all
+    three options `bounds.configured_highs` sets), so the solver ran at it before
+    `classify_bound_status`'s `math.ceil` raised a bare `ValueError` or `OverflowError` on the
+    first bounded integer cell: closed, but unnamed and one solve late (§18.3). A NaN
+    `rank_tolerance` records every numerical rank as zero, and a NaN MILP width silently means
+    "never re-solve".
+
+    The two tolerances are also `gt=0.0`; the switch is not. At or below zero HiGHS refuses the
+    feasibility tolerance with `kError` and keeps its own default, a status `configured_highs` does
+    not read, so `solver_tolerance` would record a tolerance the solver never ran at. A negative one
+    also turns §9.6's `ceil(lower - tolerance) == floor(upper + tolerance)` inside out, so the exact
+    point [5, 5] reads as partially identified and §9.8's `exact_reconstruction_flag` misses it.
+    `matrix_rank`
+    counts singular values strictly above `rank_tolerance`, so at zero it counts float residue as
+    rank (a 2e-17 singular value, measured) and CON-003's recorded nullity understates the free
+    directions. At zero the switch re-solves nothing -- `enforce_integrality: false`'s outcome,
+    spelled as a width -- and Appendix A gives it no bound to enforce.
     """
 
     enforce_integrality: bool
-    use_milp_when_lp_interval_width_below: float
+    use_milp_when_lp_interval_width_below: float = Field(..., allow_inf_nan=False)
     solver: Literal["highs"]
-    feasibility_tolerance: float
-    rank_tolerance: float
+    feasibility_tolerance: float = Field(..., gt=0.0, allow_inf_nan=False)
+    rank_tolerance: float = Field(..., gt=0.0, allow_inf_nan=False)
 
 
 class ReconciliationConfig(_Strict):
@@ -163,6 +182,18 @@ class ReconciliationConfig(_Strict):
     and is deliberately not reused: a bound solved to 1e-7 and a residual reconciled to 1e-9 are
     different obligations, and coupling them would make a solver tuning change silently move a
     published total.
+
+    `tolerance` and `zero_seed_floor` refuse NaN and ±inf at load and are `gt=0.0`. `tolerance` is
+    the margin in `baselines.runner.leaves_its_interval`, in the float estimate's
+    `assert_within_bounds` (INV-002's per-cell half; the integer release uses the solver's), in
+    `scale_into_bounds`'s §12.3 infeasibility and drift tests, and in `cli.py::reconcile_command`'s
+    gate. +inf passed all of them and NaN all but the last, because `value > upper + tolerance` is
+    false for every value: INV-002's per-cell check passed vacuously, and
+    `math.isclose(abs_tol=inf)` sent `scale_into_bounds` to every cell's lower bound whatever the
+    residual. At or below zero it fails the other way and is no tolerance at all: `math.isclose`
+    raises on a negative `abs_tol`, and zero reinstates the exact comparison `scale_into_bounds`
+    documents rejecting a feasible month. §12.4's "small positive floor" is `zero_seed_floor`'s
+    bound, and a non-finite value is no floor: `max(0.0, nan)` is 0.0.
     """
 
     single_margin_method: Literal["bounded_proportional_scaling"]
@@ -170,12 +201,12 @@ class ReconciliationConfig(_Strict):
     integerize_release: bool
     # Originated here. Tighter than the solver's 1e-7 because a residual is an adding-up identity
     # over at most 15 cells, not an optimum over a polytope.
-    tolerance: float = 1.0e-9
+    tolerance: float = Field(default=1.0e-9, gt=0.0, allow_inf_nan=False)
     max_bisection_iterations: int = 200
     max_projection_iterations: int = 1000
     # §12.4 requires "a small positive floor for zero raw seeds" and gives no value. A seed of
     # exactly 0 makes the KL objective undefined, so this is a hard numerical requirement.
-    zero_seed_floor: float = 1.0e-12
+    zero_seed_floor: float = Field(default=1.0e-12, gt=0.0, allow_inf_nan=False)
     # §12.6 step 3. MUST stay deterministic or §16.1's idempotence requirement breaks.
     integerization_tiebreak: Literal["largest_remainder"] = "largest_remainder"
 
@@ -206,13 +237,23 @@ class DisclosureConfig(_Strict):
     `narrow_interval_absolute_width` employees, or when width divided by midpoint is at most
     `narrow_interval_relative_width`. §14.2 asks for both an absolute and a relative test, so both
     are configured and either one alone is sufficient to route a cell to review.
+
+    Both widths refuse NaN and ±inf at load, and neither is sign-bounded. `disclosure.flags`
+    compares them in polars, which orders NaN above every number (measured 2026-09-27: `width <=
+    NaN` is true for every width), so a NaN width flagged every finite suppressed interval where
+    an IEEE comparison flags none -- a threshold whose meaning depends on the library comparing it
+    is no policy -- and ±inf say "every interval" and "none", which a finite width also says. At
+    zero an arm flags nothing wider than a point. That is an "off" position, the kind
+    `tests/integration/test_d1_acceptance.py` sets each arm to in turn and calls "a width a config
+    file could legally carry"; where narrow begins is the owner's call (§21), not a bound this
+    module may invent.
     """
 
     exact_reconstruction_action: Literal["withhold", "manual_review", "release"]
     narrow_interval_action: Literal["withhold", "manual_review", "release"]
     publish_label_required: bool
-    narrow_interval_absolute_width: float
-    narrow_interval_relative_width: float
+    narrow_interval_absolute_width: float = Field(..., allow_inf_nan=False)
+    narrow_interval_relative_width: float = Field(..., allow_inf_nan=False)
 
 
 class ValidationConfig(_Strict):
