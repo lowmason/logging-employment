@@ -6,11 +6,14 @@
 
 > Roadmap: specs/logging-employment-spec-roadmap.md, Stage 5 — on plan completion, tick the stage and re-validate later stages against what shipped.
 
-> **Decision 15 is open, and it must be answered before Task 15.** While this plan was written, a
-> production-config fit of the model as §11 writes it failed §11.14's gate on D1 (parameter R-hat
-> 3.76, cell bulk ESS 5.7 against 400). Two diagnostic fits showed the model is weakly identified
-> there, not under-sampled. Tasks 0–14 are the same under either answer in Decision 15 except where
-> it says otherwise; Task 15 is not.
+> **Decision 15 was answered on 2026-09-26, and the model changed before execution.** While this
+> plan was written, a production-config fit of the model as §11 writes it failed §11.14's gate on D1
+> (parameter R-hat 3.76, cell bulk ESS 5.7 against 400). Your human partner chose a design pass
+> first. The pass changed four things: training cells are exact, trained states are sampled in the
+> coordinates the data pin, persistence is capped, and X is split into within-state and
+> between-state parts. The revised model passed the production gate on D1 on two seeds, through the
+> real fit → reconcile → gate, at about 130 s a fit. Decision 15 has the evidence. Decision 7 flags
+> the four spec readings the change takes.
 
 **Goal:** Fit §11's robust hierarchical state-intensity model, reconcile every joint draw to the hard
 constraints, enforce §11.14's diagnostics in code, and promote the model over the Stage 4 preferred
@@ -38,7 +41,7 @@ pytest; new here: JAX, NumPyro, arviz-base, arviz-stats (with xarray) and h5netc
 
 `D-120`, the §12.2/§15.2 amendment the brief anticipated, landed before this plan was saved, so Decision 2 cites it.
 
-**Provenance of the code in this plan.** Every code block in Tasks 1–14 was executed before this plan was saved, in plan order, as one commit per task in a scratch repository built from `40b2688`.
+**Provenance of the code in this plan.** Every code block in Tasks 1–14 was executed before this plan was saved, in plan order, as one commit per task in a scratch repository built from `40b2688`. The whole chain was rebuilt and re-run after Decision 15's pass.
 - Each red output shown was observed by running that task's tests against the previous task's commit.
 - Every commit passed `ruff format --check`, `ruff check`, `interrogate`, its own tests, and the non-slow suite without `data/`.
 - The environment was Python 3.14 with jax 0.11.1, numpyro 0.21.0, arviz-base 1.3.0, arviz-stats 1.3.2 and xarray 2026.7.0, one release behind each pin, with NumPy 2.5.3 and Polars 1.44.2 against the lock's 2.5.2 and 1.44.1. Installing the pinned versions needs network access this session did not use. Task 1's probes exist to catch the difference in seconds.
@@ -46,9 +49,9 @@ pytest; new here: JAX, NumPyro, arviz-base, arviz-stats (with xarray) and h5netc
 
 **Suite counts are stated as deltas, and every delta was measured.**
 - Base, with `data/`: `1570 passed` for the whole suite (12 min) and `1543 passed, 27 deselected` for the non-slow tier (2.5 min), at `40b2688`, measured while this plan was written.
-- Tests added: 129, of which 18 are `slow`, and every one runs without `data/`.
-- Per-task deltas on the non-slow suite: Task 1 +6, Task 2 +14, Task 3 +14, Task 4 +10, Task 5 +8, Task 6 +9, Task 7 +4, Task 8 +12, Task 9 +3, Task 10 +0 (7 slow), Task 11 +14, Task 12 +17, Task 13 +0 (6 slow).
-- The scratch's hermetic count after Task 13 was `1604 passed, 45 skipped, 46 deselected`. With the five h5netcdf tests below, that becomes the `1609 passed, 45 skipped, 45 deselected` Task 14 expects.
+- Tests added: 135, of which 21 are `slow`, and every one runs without `data/`.
+- Per-task deltas on the non-slow suite: Task 1 +6, Task 2 +14, Task 3 +14, Task 4 +13, Task 5 +8, Task 6 +9, Task 7 +4, Task 8 +12, Task 9 +3, Task 10 +0 (10 slow), Task 11 +14, Task 12 +17, Task 13 +0 (6 slow).
+- The scratch's hermetic count after Task 13 was `1607 passed, 45 skipped, 49 deselected`. With the five h5netcdf tests below, that becomes the `1612 passed, 45 skipped, 48 deselected` Task 14 expects.
 
 **What was NOT executed, and why:**
 
@@ -60,17 +63,17 @@ pytest; new here: JAX, NumPyro, arviz-base, arviz-stats (with xarray) and h5netc
   - the four Task 13 tests on the `validated` fixture.
 
   Everything they call below the netCDF layer ran.
-- **Every `requires_staged` test at Tasks 1–14.** The per-task gates ran without `data/`, so these were collected and skipped. The non-slow ones then ran once at Task 14's code with `data/` linked: `1649 passed, 46 deselected`, which is 1543 + 111 less the five h5netcdf tests, the moved pin included. The slow D1 tier was not re-run on plan code; Task 15 Step 4's byte comparison is its check.
-- **Task 14's two measured counts,** predicted above from the scratch's.
-- **Task 15, apart from two pieces.** The production fit, its reconciliation and its gate ran on D1 through the scratch code (Decision 15). Step 4's byte comparison was dry-run against a doctored copy of the comparand: it accepted exactly the declared differences and named two planted ones. The re-run itself, and the fit on the locked versions, happen first at execution.
+- **Every `requires_staged` test at Tasks 1–14.** The per-task gates ran without `data/`, so these were collected and skipped. The non-slow ones then ran once at Task 14's code with `data/` linked: `1652 passed, 49 deselected`, which is 1543 + 114 less the five h5netcdf tests, the moved pin included. The slow D1 tier was not re-run on plan code; Task 15 Step 4's byte comparison is its check.
+- **Task 14's two measured counts,** predicted from the scratch's: a bare run at Task 14's code without `data/`, leaving out the 13 tests that need h5netcdf, gave `1620 passed, 72 skipped`, and those 13 make it the `1633 passed, 72 skipped` Task 14 expects. The hermetic count is the one above.
+- **Task 15, apart from three pieces.** Its production fit, reconciliation and gate ran on D1 through the scratch code on two seeds, and passed (Decision 15). Seven replicate masks ran through the same fit, reconcile and gate code, outside the CLI. Step 4's byte comparison was dry-run against a doctored copy of the comparand: it accepted exactly the declared differences and named two planted ones. The comparand re-run itself, the CLI's 27 replicate fits, and every fit on the locked versions happen first at execution.
 
 ---
 
 ## Decisions this plan makes
 
-The brief leaves these open, or flags them for an explicit decision. Each gives its evidence so a reviewer can reject the decision rather than rediscover it. The three the brief flags are 1, 2 and 3. Decisions 4 and 5 are the readings of the spec a reviewer is most likely to want changed. Decision 15 is a question only your human partner can answer, and it comes before Task 15.
+The brief leaves these open, or flags them for an explicit decision. Each gives its evidence so a reviewer can reject the decision rather than rediscover it. The three the brief flags are 1, 2 and 3. Decisions 4, 5 and 7 are the readings of the spec a reviewer is most likely to want changed. Decision 15 was a question only your human partner could answer. They answered it with a design pass, and it now records how that pass changed the model.
 
-1. **Appendix A's `model:` block goes INTO `resolved_dict`, so the run id moves, exactly once.** `specs/completed/stage5-preconditions.md` §4 leaves the choice to this plan. `exclude=True` is the remedy for a key no stage reads (`SourcesConfig`'s seven inactive sources). Every key here changes the draws `fit-state-model` writes, and excluding them would let two fits under different priors share one `runs/<id>/`. The cost is one re-id. Both ids were computed from the scratch tree while this plan was written. The config-only canary `run_id(load_config("config.yaml"), {})` moves `39d1d0859838` → `5506f8876841`. The staged pin over `data/staged`'s five tables moves `4cf47a918dd8` → `597f02571f3e`. `promotion.catastrophic_stratum_coverage_alpha` (Decision 4) lands in the same task, so the id moves once rather than twice.
+1. **Appendix A's `model:` block goes INTO `resolved_dict`, so the run id moves, exactly once.** `specs/completed/stage5-preconditions.md` §4 leaves the choice to this plan. `exclude=True` is the remedy for a key no stage reads (`SourcesConfig`'s seven inactive sources). Every key here changes the draws `fit-state-model` writes, and excluding them would let two fits under different priors share one `runs/<id>/`. The cost is one re-id. Both ids were computed from the scratch tree after Decision 15's pass settled the `priors` block, and the staged pin was confirmed by running its own test with `data/` linked. The config-only canary `run_id(load_config("config.yaml"), {})` moves `39d1d0859838` → `14352bb8e56e`. The staged pin over `data/staged`'s five tables moves `4cf47a918dd8` → `dd7337e89047`. `promotion.catastrophic_stratum_coverage_alpha` (Decision 4) lands in the same task, so the id moves once rather than twice.
 
    **The comparand is re-run under the new id and checked byte for byte (Task 15)**: `build-constraints` → `solve-bounds` → `run-baselines` → `reconcile` → `validate`. The checks are: every parquet file identical by sha256; every JSON manifest identical except `code_commit` and `uv_lock_sha256` (no manifest in `runs/4cf47a918dd8` names its own run id, checked); and `config.resolved.yaml` differing only by the `model:` block and the new promotion key. `runs/4cf47a918dd8` stays on disk untouched.
 
@@ -98,29 +101,34 @@ The brief leaves these open, or flags them for an explicit decision. Each gives 
    - divergences (0);
    - rank R-hat ≤ 1.01 over every monitored parameter element, and over every imputed cell's reconciled draws (§11.14's "stable posterior summaries across independent seeds/chains");
    - bulk and tail ESS ≥ `min_ess_per_chain` × chains = 400 on the imputed cells, the "release-relevant summaries";
-   - in-sample 90% predictive coverage ≥ 0.85 over the training cells;
+   - one-step-ahead 90% predictive coverage ≥ 0.85 over the training cells (below);
    - both reconciliation checks.
 
-   `replicate` (the harness's 27 fits) records all of these and gates only on divergences and parameter R-hat. Over roughly 1,400 quantities and 27 fits, a max-statistic gate would let one cell at 1.011 in one replicate decide promotion. §11.14 gives no ESS number, and 100 per chain is the Vehtari et al. convention. A cell a one-cell missing set pins never varies, so it is counted in `cells_constant` and excluded. Any other NaN fails its check.
+   `replicate` (the harness's 27 fits) records all of these and gates only on divergences and parameter R-hat. Over roughly 1,400 quantities and 27 fits, a max-statistic gate would let one cell at 1.011 in one replicate decide promotion. That was measured, not only argued. Decision 15's pass ran seven replicate masks. All seven passed this scope, and one (`small_cell_biased`, seed 1024) would have failed production scope on cell tail ESS: 259 against 400. §11.14 gives no ESS number, and 100 per chain is the Vehtari et al. convention. A cell a one-cell missing set pins never varies, so it is counted in `cells_constant` and excluded. Any other NaN fails its check.
 
-   **The PPC check is one-sided, and flagged.** `min_ppc_coverage_90` is a key this plan originates (Appendix A's `model:` block has no diagnostics keys), and coverage above the nominal is not scored. D1's failed fit scored 1.0 on it, a symptom of chains that disagree, which its other checks caught (Decision 15). A two-sided reading needs a second originated key. Decided before Task 2, it rides the same run-id move.
+   **The PPC check is one-step-ahead and one-sided, and flagged.** Training cells are exact (Decision 15), so a training cell's in-sample replicate is y itself, and an in-sample check would pass by construction. The check is the one a state-space model admits. Each draw predicts each training cell from the month before: m + ρ·η[t−1], plus a Student-t innovation at the cell's scale (the stationary scale in the first month). The share of cells whose y falls inside its central 90% interval must reach `min_ppc_coverage_90`. That tests the innovation law the likelihood scores, and on D1 it scored 0.904 and 0.905 on two seeds. `min_ppc_coverage_90` is a key this plan originates (Appendix A's `model:` block has no diagnostics keys), and coverage above the nominal is not scored. Under §11's original σ_y model, the in-sample version scored 1.0 on D1's failed fit, a symptom of chains that disagreed. That model and its check no longer exist. A two-sided reading needs a second originated key. Decided before Task 2, it rides the same run-id move.
 
-6. **§11.5's score is kept literal: `q = A · exp(mu)`.** mu includes the state-month path eta, so §11.2's process variation reaches every suppressed month. §11.3's observation scale σ_y does not, because §11.5 does not put it there. The fit records the posterior medians of σ_y and σ_η in `state_model_manifest.json`, so a reviewer can see from data whether the omission is material. On D1 they were 0.004 and 0.033 (Decision 15). Adding σ_y would change `state_total.raw_scores` alone.
+6. **§11.5's score is kept literal: `q = A · exp(mu)`.** mu includes the state-month path eta, so §11.2's process variation reaches every suppressed month. It is the only per-cell variation the model has. Training cells are exact (Decision 15), so there is no observation scale for the score to include or leave out. The question this decision first answered, whether §11.3's σ_y belonged in the score, went away with σ_y. The fit records the posterior medians of σ_η and ρ in `state_model_manifest.json`, so a reviewer can read the fit's innovation scale and persistence without opening the store. On D1 they were 0.036 and 0.838.
 
 7. **The model's structure.**
    - H is omitted: `include_harvest_factor` is `Literal[False]`, and Stage 7 adds it.
-   - X is standardized log `qtrly_establishments`, centred and scaled over training and prediction cells together. It is published where employment is suppressed.
+   - X is standardized log `qtrly_establishments`, centred and scaled over training and prediction cells together. It is published where employment is suppressed. It enters as two terms, β·(x − x̄_s) + β_between·x̄_s, both slopes N(0, `standardized_beta_sd`) (reading 4 below).
    - One latent AR(1) path per state crosses the 2022-01 NAICS seam. `113310` maps one-to-one across both vintages, the year effects absorb a level shift, and each cell keeps its own vintage in its `cell_id`.
    - True zeros are neither trained on nor predicted, and `A > 0` is asserted on every cell that is.
    - The priors are `config.StateModelPriors`:
      - intercept N(1.5, 1), centred on D1's observed mean log employees per establishment of 1.46 (SD 0.48, over the 3,462 training cells);
      - state, region, month and year scales HalfNormal(0.5, 0.5, 0.25, 0.25);
-     - persistence Beta(8, 2), §11.12's "centered near 0.8";
+     - persistence `persistence_max` · Beta(8, 2) = 0.95 · Beta(8, 2), prior mean 0.76 (reading 2 below);
      - innovation scale HalfNormal(0.1) with a log-scale dispersion HalfNormal(0.5);
-     - observation scale HalfNormal(0.1);
-     - both Student-t degrees of freedom fixed at 5 (§11.12).
-   - The parameterization is non-centred throughout (§11.14's SHOULD), with ZeroSumNormal month and year effects and a variance-matched stationary start for eta.
+     - the innovations' Student-t degrees of freedom fixed at 5 (§11.12). There is no observation scale (reading 1).
+   - The parameterization: a state with a training cell samples its level and its log innovation scale directly, and a state without one is non-centred (reading 3). Month and year effects are ZeroSumNormal, and eta starts at a variance-matched stationary scale.
    - Float64 is enabled at import, chains run `vectorized`, and the seed is `sum(map(ord, "logging-employment/state-total-model"))` = 3645.
+
+   **Four readings of the spec, FLAGGED FOR REVIEW.** A D1 measurement in Decision 15's pass forced each one. Each is a place a reviewer may prefer a spec amendment to this plan's reading.
+   1. **§11.3: exact observation governs, and the "practical response model" is dropped.** §11.3 opens "Published QCEW values are exact observations … there is no extra arbitrary measurement error". It offers y ~ t(μ, σ_y) only as "a practical response model". On D1 the practical model failed §11.14's gate with σ_y near 0.004, and re-parameterizing it did not rescue it (R-hat 2.89). An amendment would state that training cells pin the latent path.
+   2. **§11.12: persistence is capped at 0.95, so its prior mean is 0.76, where §11.12 says "centered near 0.8".** `persistence_max` is a key this plan originates, inside the `priors` block that Decision 1 already moves the run id for. Uncapped, a production-length fit failed R-hat on one of two seeds, with δ and ρ at 1.011.
+   3. **§11.14: its non-centred SHOULD is set aside for trained states.** A SHOULD admits a measured reason. Non-centred, every tree hit the 1,023-step ceiling. In the pinned coordinates none does, and a fit takes about 130 s instead of 1,091. Untrained states keep the SHOULD.
+   4. **§11.1: X holds two predictors built from one count, a within-state part x − x̄_s and a between-state part x̄_s.** §11.1's X_{s,t}ᵀβ admits a vector of "standardized, nonredundant predictors", and these two are nonredundant by construction. Neither is re-standardized: both are in units of standardized x, so `standardized_beta_sd` means the same for each. §11.1 does not say what X holds. This plan chose it, and until the design pass it was one predictor, standardized log A. The split is flagged because x̄_s is constant within a state, so it competes with u_s for each state's level. With one slope, a D1-regime simulation mispredicted the untrained states: their hidden-cell coverage was 0.50, and one state's true level fell 2.5 log points from its posterior mean. On D1 the two slopes have opposite signs, −1.31 and +0.34.
 
 8. **`fit_state_total_model` returns `StateModelFit`, not a bare `PosteriorDraws`**, a deviation from §16.2 recorded in `models/interfaces.py`. §11.14 says the interface "MUST return joint draws and standard diagnostics", and `PosteriorDraws` has no slot for a divergence count or a parameter trace. `StateModelFit.raw_scores` is the `PosteriorDraws` §16.2 names, imported from `reconcile/draws.py` and never redeclared.
 
@@ -133,53 +141,73 @@ The brief leaves these open, or flags them for an explicit decision. Each gives 
 
 11. **The harness's point estimate is the MEAN of the reconciled draws**, and every mean over draws is summed with `math.fsum` (`models/reconciliation.py::exact_column_means`). Every draw sums to its month's residual and lies in its interval, so their mean does too, by linearity and convexity. A per-cell median has neither property, and `constraint_metrics` would score its adding-up gap as the model breaking a constraint it never broke. `ndarray.mean(axis=0)` moved one cell's mean in the last place in the scratch run (41.20440509225164 against the column's own 41.20440509225163). The means are digested (`posterior_summary_sha256`), so `fsum` makes them a function of the values alone, as `validate/metrics._exact_sum` does for the metrics. `posterior_summary` publishes both mean and median (§7.11).
 
+    **The mean is the less stable summary in the sparsest states. This is flagged, not changed.** On D1, two seeds' reconciled posterior medians agree within 3.7% in every imputed cell. Their means differ by up to 12.2%, and the 5 cells over 5% are all in NV, which has no training cell, and RI, which has six. There, a raw score is exp of a Student-t path through a long unpinned stretch. Its mean is heavy-tailed, and only reconciliation bounds it. The harness scores the mean, for the adding-up reasons above, so a WAPE in those states carries that seed noise. Which summary is published is a question for §7.11 and Stage 8, and `posterior_summary` carries both.
+
 12. **§10.7's time-ordered interval is not built.** The model's intervals come from its own reconciled draws (`interval_source = 'reconciled_posterior_draws'`, a third value of `contracts.INTERVAL_SOURCES`, now enforced by `assert_declared_provenance`). The baselines' leave-one-out ensemble stays as it is under its own name. `validate/intervals.py`'s docstring, which said Stage 5 would build the rolling version, is corrected.
 
 13. **The per-task gate is the non-slow suite plus that task's slow tests, by path.** `uv run pytest -q -m "not slow"` runs everything else, and a task that adds a slow module runs it by name. The whole suite, slow tier included, runs at Task 14. The `slow` tier holds every NUTS fit larger than a toy.
 
 14. **Execution runs in a worktree, with `data/` and `runs/` symlinked from the main checkout (Task 0).** Another session edits `specs/` in the main checkout concurrently, so this branch stays out of it. `.gitignore`'s `data/` and `runs/` match directories only, so the two symlinks are excluded through the common `info/exclude`. The symlinks make every `requires_staged` test run at every gate, so the pin moved in Task 2 is observed at once.
 
-15. **D1 feasibility was measured, and the model as §11 writes it fails §11.14's gate on D1. FLAGGED; this is the open question the plan hands over with, and it blocks Task 15, not Tasks 0–14.**
+15. **The model was redesigned before execution, and the redesign passes §11.14's gate on D1.** Your human partner answered this decision's question with (b), a design pass first, on 2026-09-26. This is that pass's record. Four of its choices read the spec differently from its text, and Decision 7 flags each for review.
 
-    **What was run.** The scratch code of Tasks 3–8 ran on the older local environment (jax 0.11.1, numpyro 0.21.0). It made one production-config fit of the D1 panel: 50 states, 96 months, 3,462 training and 1,227 prediction cells. The config was 4 chains of 1,000 warmup and 1,000 draws, seed 3645, `target_accept` 0.9, tree depth 10.
-    - **The fit** took 1,091 s (18.2 min).
-    - **Reconciliation** took 36 s over 4,000 draws × 1,227 cells: max anchor drift 4.5e-13, 0 bound violations. Tasks 5–8 did their job.
-    - **The production gate failed five checks:** 2 divergences; parameter R-hat 3.76; cell R-hat 1.93; cell bulk ESS 5.7 and tail ESS 13.9 against 400.
-    - **The sampler** hit the tree-depth ceiling on 99.95% of iterations, 1,022.7 leapfrog steps on average.
-    - **The posterior medians** were σ_y 0.0040 and σ_η 0.033.
+    **What failed: §11's model as written.** The scratch code of Tasks 3–8 made one production-config fit of the D1 panel: 50 states, 96 months, 3,462 training and 1,227 prediction cells, 4 chains of 1,000 warmup and 1,000 draws, seed 3645, `target_accept` 0.9, tree depth 10.
+    - It took 1,091 s, and 99.95% of its trees hit the depth ceiling.
+    - The production gate failed five checks: 2 divergences, parameter R-hat 3.76, cell R-hat 1.93, and cell bulk and tail ESS 5.7 and 13.9 against 400. Reconciliation did its job (anchor drift 4.5e-13, 0 bound violations).
+    - Two 4 × 300/300 fits showed chains that disagree about where the posterior is, not chains that are slow. β's chain means were −0.01, −1.19, 0.01 and −1.15, and σ_u ran from 0.18 to 1.41. Centring η made it worse: 170 divergences, and σ_u collapsed to 0.0004–0.013 as the paths absorbed the state levels.
+    - Every chain put σ_y between 0.003 and 0.006. At that scale the training cells pin μ in all but name.
 
-    **Diagnosis: two 4 × 300/300 fits, samples saved.**
-    - **Non-centred, the model as written.** No divergences, every iteration saturated, step sizes 2e-4 to 5e-4. The chains do not agree on where the posterior is. β's chain means are −0.01, −1.19, 0.01 and −1.15; σ_u's run 0.18–1.41 and α's 1.33–1.82. The worst R-hats are u 4.1, σ_u 3.6 and ρ 3.6.
-    - **Centred η**, the same joint density in other coordinates. Worse: 170 divergences, and σ_u collapses to 0.0004–0.013 as the η paths absorb the state levels. R-hat is β 3.96 and α 2.5. Vermont, with no training cell, shows the centred funnel: its σ_η,s chain means run 0.03–0.18.
-    - **In both**, every chain puts σ_y between 0.003 and 0.006. Its R-hat is still 2.9 non-centred and 1.7 centred, so the chains share its scale, not its value. It does not split the way β does, but at that scale it pins every training cell to a thin manifold.
+    **The design pass.** Fourteen variants, the two diagnostic fits above among them, were fitted to the same D1 panel. Each was screened at 4 × 300/300, where R-hat ≤ 1.1 decided only whether to keep it. A variant was accepted only through the real fit → reconcile → production gate on two seeds, plus recovery at D1's regime. Four changes survived. Each is listed with the measurement that kept it.
+    1. **Training cells are exact** (§11.3's first sentence). At a training cell the path is pinned, η = y − m, and the likelihood is the AR(1) density of the innovation that pinning implies. There is no σ_y, and `priors` loses its two `observation_*` keys. The control variant kept σ_y and changed only the parameterization, centring η wherever a state has at least 48 training months. It still split the chains: R-hat 2.89, three chains with σ_u under 0.006 and ρ up to 0.999, and one with σ_u 0.70. Exact observation made all four chains agree (β −1.21, σ_u 1.15), but every tree still saturated.
+    2. **Trained states are sampled in the coordinates the data pin.** For a state with a training cell, exact innovations pin its level L = α + u + v + β_between·x̄ and its log innovation scale. So the 44 trained states sample those two directly, and u = L − α − v − β_between·x̄ is derived. That is a shear with Jacobian 1: the same model in other coordinates. The six untrained states stay non-centred. In non-centred coordinates every tree hit the 1,023-step ceiling. In these, trees average 31 steps, none saturates, and a production fit takes about 130 s instead of 1,091.
+    3. **Persistence is capped:** ρ = `persistence_max` · Beta(8, 2), with `persistence_max` 0.95, which is §11.12's "transformed Beta prior" with mean 0.76. Uncapped, the largest state's posterior-mean ρ on D1 was 0.978, with 6% of states above 0.95, and a production-length fit failed §11.14's R-hat on seed 3645, with δ and ρ at 1.011. Capped, both seeds passed at 1.005. This was measured with change 2 in place, before change 4. Change 4 does not touch persistence.
+    4. **X enters as a within-state part and a between-state part:** β·(x − x̄_s) + β_between·x̄_s, where x̄_s is the state's mean exposure over training and prediction cells, and β_between ~ N(0, `standardized_beta_sd`). With one β, Task 10's D1-regime test failed on prediction, not on mixing. The simulated panel's u tracked x̄ (correlation 0.91). An untrained state's true level fell 2.5 log points from its posterior mean, outside its 95% interval. Hidden-cell 90% coverage was 0.50 in the untrained states. On D1 the split finds β −1.31 and β_between +0.34 (posterior means). The correlation of u with x̄ over trained states is 0.013, and σ_u falls from 1.12 to 0.31.
 
-    **Reading.** The model is weakly identified on D1, not under-sampled, and a longer run will not fix it. With σ_y near zero, every training cell fixes μ. The level (α, u, v), β and η's slow components then trade along ridges that 1,023 leapfrog steps cannot cross. §11.3 opens: "Published QCEW values are exact observations … there is no extra arbitrary measurement error added merely because the value is small". It offers y ~ t(μ, σ_y) only as "a practical response model". On D1 the data agree with the first sentence, and the model carries two per-cell terms, η and σ_y noise, where the data support one.
+    **The predictive check becomes one-step-ahead** (Decision 5). An exact training cell's in-sample replicate is y itself, so an in-sample check would pass by construction.
 
-    **Task 10 does not transfer.** Its panel is σ_y 0.05 against σ_η 0.08, with every state trained. D1 is about 0.004 against 0.033, with six states that have no training cell at all (02, 10, 15, 32, 38, 50) and eight with 12 or fewer. The recovery test's pass says nothing about D1.
+    **Acceptance, measured on the older local environment (jax 0.11.1, numpyro 0.21.0):**
+    - **D1, the production gate, through the real fit → reconcile → gate, on two seeds.**
+      - Seed 3645 PASSED: 0 divergences, parameter R-hat 1.0047, cell R-hat 1.0042, cell ESS bulk 975 and tail 1,176, one-step coverage 0.904, anchor drift 4.5e-13, 0 bound violations. The fit took 129.5 s and reconciliation 37.7 s, at 31 leapfrog steps a draw with no saturated tree.
+      - Seed 20260926 PASSED: parameter R-hat 1.0086, cell R-hat 1.0049, cell ESS 1,268 and 723, one-step coverage 0.905, fit 130.7 s.
+      - The posterior medians were σ_η 0.036 and ρ 0.838 on both seeds.
+    - **Recovery.**
+      - Task 10's D1-regime panel: 10 of 10.
+      - The real model at D1's own mask and x, simulated from its D1 posterior means and refitted: 42 of 44 trained and 6 of 6 untrained levels fall inside their 95% intervals. β's and β_between's intervals hold their truths. Hidden-cell 90% coverage is 0.90 in trained states' gaps and 1.00 in untrained states.
+    - **§13's replicate masks.** Seven regime and seed pairs went through mask → §9 solve → fit → reconcile → gate. Six ran on the final model, and `long_consecutive_runs` ran on the model before change 4.
+      - All seven pass the replicate gate: parameter R-hat 1.0045–1.0055, 0 divergences, each fit 114–146 s.
+      - Read at production scope, for information, six of seven pass. `small_cell_biased` seed 1024 has cell tail ESS 259 against 400.
 
-    **What happens if the model is not changed.** Task 15's `fit-state-model` exits 1 on D1 and writes only `posterior/diagnostics.json`. `validate-state-model` records `not_beaten` without spending replicate fits (Decision 9) and selects the §10.8 hierarchy.
-    - **Met:** the roadmap's five Exit criteria, as written. The gate is enforced in code, and the record says not beaten and selects the simpler method.
-    - **Not met:** §19 Phase 3's acceptance, "diagnostics pass".
-    - **Not produced:** the D1 store and `posterior_summary.parquet` in the Produces line.
-    - **Broken:** Stage 6's assumption of "reconciled state totals as the row margin Stage 6 allocates".
-    - **Cost, had the gate passed:** 27 replicate fits × 1,091 s is about 8.2 h before reconciliation, past Task 15's 8-hour stop line.
+    **What the evidence does not settle, and where each goes:**
+    - **Margins.** Seed 20260926's parameter R-hat was 1.0086 against 1.01. Execution samples on the locked jax 0.11.2 and numpyro 0.22.0, so its draws will differ. Task 15 keeps its fail branch.
+    - **Means in the sparsest states.** From seed to seed, reconciled posterior medians agree within 3.7% in every cell, but means differ by up to 12.2%, in NV and RI. Decision 11 covers this.
+    - **Cells on a bound.** 177 imputed cells (14%) have a zero-width 90% interval in both seeds, each on its §9 upper bound: VT 58 of its 96 predicted cells, NM 27, NH 21, CO 19, UT 16, and 36 more across seven states. In a seed-3645 refit, 192 cells had their reconciled 5% quantile on the bound.
+      - In 159 of those 192, more than half the raw draws already exceeded the bound, so the model overshoots it.
+      - Elsewhere the raw draws mostly sit below the bound, and reconciliation's scaling toward the month's residual lifts them onto it. That is the pattern in WV and IA.
 
-    **This plan does not change the model.** Which §11.3 sentence governs, and how the level is identified, is a §11 design question for your human partner, not an execution-time repair. The two answers:
-    - **(a) Exit Stage 5 with the measured `not_beaten` record.** File the identifiability as a design item that must land before Stage 6. The plan executes as written.
-    - **(b) Add a model-iteration task before Task 15.** It needs a design pass first, and that pass must settle two things, not one.
-      - **The observation model.** The leading candidate is an exact-observation reading of §11.3: η is determined at training cells and sampled only at suppressed ones, with no σ_y. **It was never fitted.**
-      - **How the level is identified.** The diagnosis also shows level and trend confounding that dropping σ_y does not obviously remove: β splits between 0 and −1.2 across non-centred chains, and σ_u collapses under centring.
+      §11.14 checks neither. Task 15 reports the count. Whether the model adds anything where §9 binds is a question for §13 and Stage 8.
+    - **Cost.** `validate-state-model`'s 27 replicate fits come to about 27 × (130 s to fit + 40 s to reconcile and gate), roughly 77 minutes at the measured speed.
 
-      Whatever the pass chooses is tested first on a Task 10 panel at D1's regime. It changes Task 4's model and Task 10's panel. If σ_y goes, it also changes Task 2's `priors` block and with it the run-id pins, and those tasks' captures are redone. Tasks 3, 5–9 and 11–14 consume `StateModelFit` and should not need to change.
+    **Where the evidence lives.** The pass's harness scripts (`variants.py`, `d1_accept.py`, `replicate_check.py`, `recover_real.py`, `bound_cause.py`) and its experiment ledger were scratch work. They are not part of this plan or the repo. A copy is kept at `~/.cache/logging-employment/plan16-scratch/` on the machine that wrote this plan. An executor needs none of them: Task 4's tests, Task 10 and Task 15 re-measure everything above that the plan depends on.
 
-    **Recommendation: (b), through a design pass before execution starts.** The failure is structural, §19 requires diagnostics to pass, and Stage 6 needs the draws. Settling the model first also keeps `run_id` to one move. Under (b), this plan is revised after that pass, not executed as saved.
+    **Tasks the answer changed:**
+    - Task 1: the NumPyro probe's toy model now uses the model's own mechanisms.
+    - Task 2: no `observation_*` priors, a new `persistence_max`, and both run-id pins.
+    - Task 3: `posterior_medians`.
+    - Task 4: the model.
+    - Task 5: the fixture's medians.
+    - Task 8: the predictive check's wording.
+    - Task 10: the D1-regime panel.
+    - Task 14: the guides and the counts.
+    - Task 15: it expects a pass and keeps the fail branch.
+
+    Tasks 6, 7, 9 and 11–13 consume `StateModelFit` and did not change.
 
 ## Global Constraints
 
 - `requires-python = ">=3.14"`; author `Lowell Mason <mason.lowell@mac.com>`; MIT (Rollout D4).
-- **`run_id` moves exactly once, in Task 2, and deliberately.** The config-only canary becomes `5506f8876841` and the staged pin `597f02571f3e`. No later task adds a `Config` field or a key to `config.yaml`. `runs/4cf47a918dd8` (the §13.10 comparand) and `runs/f03023ac9f3a` (Stage 4's acceptance run) are never written to: Task 15's re-run lands in `runs/597f02571f3e`.
+- **`run_id` moves exactly once, in Task 2, and deliberately.** The config-only canary becomes `14352bb8e56e` and the staged pin `dd7337e89047`. No later task adds a `Config` field or a key to `config.yaml`. `runs/4cf47a918dd8` (the §13.10 comparand) and `runs/f03023ac9f3a` (Stage 4's acceptance run) are never written to: Task 15's re-run lands in `runs/dd7337e89047`.
 - **Network: Task 1's `uv add` only** (PyPI). Every other task reads `data/` and writes `runs/`, and nothing else, with one exception. Task 15's `build-constraints` rewrites the main checkout's `data/constraints/`, and Step 4 proves the bytes identical against a copy taken in Step 2. No credential is needed or typed. `CENSUS_API_KEY` and `BLS_CONTACT_EMAIL` are never read by this plan.
-- **Task 15 waits for Decision 15's answer.** A production fit of the model as written failed §11.14's gate on D1 while this plan was written. Your human partner decides whether this stage exits on that record or gains a model-iteration task first.
+- **The model is Decision 15's.** A production fit of §11's model as written failed §11.14's gate on D1 while this plan was written. Your human partner answered Decision 15 with a design pass (2026-09-26), and the pass changed the model before this plan was executed: training cells are exact, trained states are sampled in the coordinates the data pin, persistence is capped, and X is split into within-state and between-state parts. Decision 7 flags the four spec readings this takes. No task re-opens them. A task whose observed output contradicts Decision 15's measurements stops and reports.
 - **Import discipline (§16.2: "PPL-specific objects must remain behind model interfaces").** `models/state_total.py` is the only module that imports JAX or NumPyro, and `models/arviz_io.py` the only one that imports ArviZ or xarray. `cli.py` imports every `models/` module inside the command that uses it, never at module level, so `--help` and the baseline commands never initialise JAX.
 - **Float64, always.** `models/state_total.py` calls `numpyro.enable_x64()` at import, and `_fit_numpyro` refuses to sample in float32.
 - **Seeds are descriptive**, `sum(map(ord, "<name>"))`, never a bare constant. The model's is 3645, from `"logging-employment/state-total-model"`.
@@ -196,14 +224,14 @@ The brief leaves these open, or flags them for an explicit decision. Each gives 
 | File | Task | Responsibility |
 |---|---|---|
 | `pyproject.toml`, `uv.lock` | 1 | five new dependencies; no locked version of an existing package moves |
-| `tests/unit/test_numpyro_api_probe.py`, `tests/unit/test_arviz_api_probe.py` | 1 | every JAX, NumPyro, ArviZ and xarray call this plan makes, run once in seconds |
+| `tests/unit/test_numpyro_api_probe.py`, `tests/unit/test_arviz_api_probe.py` | 1 | the JAX, NumPyro, ArviZ and xarray calls this plan builds on, run once in seconds |
 | `src/logging_employment/config.py` | 2, 12 | `StateModelPriors`, `StateModelDiagnostics`, `ModelConfig`, `Config.model`; `PromotionConfig`'s fourth key and, in Task 12, its docstring |
 | `config.yaml` | 2 | the `model:` block and `promotion.catastrophic_stratum_coverage_alpha` |
 | `tests/unit/test_config_model_block.py`, `tests/unit/test_config.py`, `tests/unit/test_config_validation_block.py`, `tests/integration/test_stage4_acceptance.py` | 2, 12 | the block's refusals; the fence loads whole; both run-id pins; the tripwire |
 | `src/logging_employment/models/__init__.py`, `models/interfaces.py` | 3 | §16.2's `ModelData`, `StateModelConfig`, `StateModelFit`; `MODEL_ID`, `MODEL_VERSION`, `STORE_PATH` |
 | `src/logging_employment/models/data.py` | 3 | `build_model_data`, `state_cell_ids`: the panel, split into training and prediction cells, fail-closed |
 | `src/logging_employment/baselines/runner.py` | 3, 11 | `missing_cell_ids` made public; `release_integers` extracted verbatim |
-| `src/logging_employment/models/state_total.py` | 4 | the NumPyro model, §11.5's score, the fit, `BACKENDS` (§2.2's CmdStanPy slot) |
+| `src/logging_employment/models/state_total.py` | 4 | the NumPyro model (Decision 15's), §11.5's score, the one-step check, the fit, `BACKENDS` (§2.2's CmdStanPy slot) |
 | `src/logging_employment/models/reconciliation.py` | 5 | `reconcile_fit` (every draw, every month, through `reconcile_draws`), `check_reconciled`, `exact_column_means` |
 | `tests/unit/conftest.py` | 5 | `make_state_fit`: a `StateModelFit` from a raw-score array, no sampler |
 | `src/logging_employment/contracts.py` | 6, 11 | `POSTERIOR_SUMMARY_SCHEMA`, `OBSERVED_OR_IMPUTED`; `INTERVAL_SOURCES` gains the draws and is enforced |
@@ -279,11 +307,11 @@ Every later gate states its count as this Step's non-slow number plus the tests 
 
 ---
 
-### Task 1: Dependencies, and a probe of every PPL call this plan makes
+### Task 1: Dependencies, and a probe of the PPL calls this plan builds on
 
 **Implements:** Decision 10. It serves §21's PPL row and §2.2's backend row (NumPyro first; CmdStanPy is a slot, `models/state_total.py::BACKENDS`).
 
-This plan was written without JAX, NumPyro, ArviZ or h5netcdf in the project's environment. The NumPyro and ArviZ calls were read in the tagged sources: numpyro 0.22.0 `infer/mcmc.py`, `util.py` and `distributions/continuous.py`; arviz-stats v1.3.3 `sampling_diagnostics.py` and `__init__.py`; arviz-base v1.3.1 `io_dict.py`. They were then run in a second local Python 3.14 environment one release behind each pin (jax 0.11.1, numpyro 0.21.0, arviz-base 1.3.0, arviz-stats 1.3.2, xarray 2026.7.0) that has no h5netcdf. That run found one call the source reading had missed: `ess(..., method="tail")` on an array needs `prob`. These probes pin every call against the versions the lock actually installs, in seconds, before Task 4 builds on them.
+This plan was written without JAX, NumPyro, ArviZ or h5netcdf in the project's environment. The NumPyro and ArviZ calls were read in the tagged sources: numpyro 0.22.0 `infer/mcmc.py`, `util.py` and `distributions/continuous.py`; arviz-stats v1.3.3 `sampling_diagnostics.py` and `__init__.py`; arviz-base v1.3.1 `io_dict.py`. They were then run in a second local Python 3.14 environment one release behind each pin (jax 0.11.1, numpyro 0.21.0, arviz-base 1.3.0, arviz-stats 1.3.2, xarray 2026.7.0) that has no h5netcdf. That run found one call the source reading had missed: `ess(..., method="tail")` on an array needs `prob`. These probes pin those calls against the versions the lock actually installs, in seconds, before Task 4 builds on them. The NumPyro probe's toy uses the state-total model's own mechanisms (Decision 15): a scanned AR(1) path, pinned and scored through `numpyro.factor` when data are given, and drawn from unit innovations and recorded with `numpyro.deterministic` when not.
 
 **Files:**
 - Modify: `pyproject.toml` (`[project].dependencies`), `uv.lock` (written by `uv add` only)
@@ -306,11 +334,13 @@ This plan was written without JAX, NumPyro, ArviZ or h5netcdf in the project's e
 `tests/unit/test_numpyro_api_probe.py`:
 
 ```python
-"""Every NumPyro and JAX call `models/state_total.py` makes, run once on a one-parameter model.
+"""The NumPyro and JAX mechanisms `models/state_total.py` is built on, run once on a toy model.
 
-Plan 16 was written without JAX or NumPyro installed, so these calls were checked against the
-libraries' source rather than run. An API that moved fails here, in seconds, before Task 4 builds
-the state-total model on it.
+The model scores exact training cells by pinning a scanned AR(1) path and adding the innovations'
+Student-t log density through `numpyro.factor`. With nothing to pin, it draws the path from unit
+innovations and records it with `numpyro.deterministic`, which is what `Predictive` returns. The
+toy below does both, beside a zero-sum seasonal vector, so an API that moved fails here, in seconds,
+before Task 4 builds the state-total model on it.
 """
 
 from __future__ import annotations
@@ -328,11 +358,23 @@ SEED = sum(map(ord, "tests/numpyro-api-probe"))
 
 
 def _model(y: jnp.ndarray | None = None) -> None:
-    """A location with a zero-sum twelve-month vector beside it, conditioned on `y` when given."""
+    """An AR(1) path around a location, pinned to `y` and scored when given, drawn when not."""
     mu = numpyro.sample("mu", dist.Normal(0.0, 1.0))
+    rho = numpyro.sample("rho", dist.Beta(8.0, 2.0))
+    scale = numpyro.sample("scale", dist.HalfNormal(0.1))
     numpyro.sample("season", dist.ZeroSumNormal(0.5, event_shape=(12,)))
-    with numpyro.plate("obs", 5):
-        numpyro.sample("y", dist.StudentT(5.0, mu, 1.0), obs=y)
+    if y is None:
+        z = numpyro.sample("z", dist.StudentT(5.0, 0.0, 1.0).expand([5]).to_event(1))
+
+        def step(previous: jnp.ndarray, innovation: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+            current = rho * previous + scale * innovation
+            return current, current
+
+        _, path = jax.lax.scan(step, jnp.zeros(()), z)
+        numpyro.deterministic("y", mu + path)
+        return
+    innovations = (y[1:] - mu) - rho * (y[:-1] - mu)
+    numpyro.factor("y", dist.StudentT(5.0, 0.0, scale).log_prob(innovations).sum())
 
 
 def test_enable_x64_makes_jax_arrays_float64() -> None:
@@ -511,7 +553,7 @@ Expected: all three gates clean. Non-slow suite: Task 0's count **+ 6 passed**, 
 
 ```bash
 git add pyproject.toml uv.lock tests/unit/test_numpyro_api_probe.py tests/unit/test_arviz_api_probe.py
-git commit -m "build: add JAX, NumPyro, ArviZ and h5netcdf, and probe every call plan 16 makes"
+git commit -m "build: add JAX, NumPyro, ArviZ and h5netcdf, and probe the calls plan 16 builds on"
 ```
 
 ---
@@ -530,7 +572,7 @@ Both config additions land in this one task because both feed `resolved_dict`. S
 **Interfaces:**
 - Consumes: nothing from this plan.
 - Produces:
-  - `config.StateModelPriors`: 13 floats, as Decision 7 lists them;
+  - `config.StateModelPriors`: 12 floats, as Decision 7 lists them. There is no observation scale (Decision 15), and `persistence_max` caps ρ;
   - `config.StateModelDiagnostics`: `max_rhat: float = 1.01`, `min_ess_per_chain: int = 100`, `max_divergences: int = 0`, `min_ppc_coverage_90: float = 0.85`;
   - `config.ModelConfig`:
     - `backend: Literal["numpyro"]`;
@@ -629,7 +671,7 @@ def test_the_model_block_reaches_the_run_id() -> None:
 
 ```diff
 diff --git a/tests/unit/test_config.py b/tests/unit/test_config.py
-index dadcd51..4f31b59 100644
+index dadcd51..6b08f0a 100644
 --- a/tests/unit/test_config.py
 +++ b/tests/unit/test_config.py
 @@ -10,14 +10,14 @@ import pytest
@@ -760,7 +802,7 @@ index dadcd51..4f31b59 100644
 +    the seven inactive sources still move nothing.
      """
 -    assert run_id(load_config(REPO_ROOT / "config.yaml"), {}) == "39d1d0859838"
-+    assert run_id(load_config(REPO_ROOT / "config.yaml"), {}) == "5506f8876841"
++    assert run_id(load_config(REPO_ROOT / "config.yaml"), {}) == "14352bb8e56e"
 ```
 
 `tests/unit/test_config_validation_block.py`: the fourth key joins `PROMOTION_KEYS`, which the unchanged tripwire watches, and gets its own value test (+1).
@@ -799,7 +841,7 @@ index 59d5ca1..bb1c4c7 100644
 
 ```diff
 diff --git a/tests/integration/test_stage4_acceptance.py b/tests/integration/test_stage4_acceptance.py
-index 8344a2d..800e48a 100644
+index 8344a2d..e05267b 100644
 --- a/tests/integration/test_stage4_acceptance.py
 +++ b/tests/integration/test_stage4_acceptance.py
 @@ -227,9 +227,13 @@ def test_the_shipped_config_resolves_to_the_parent_margin_comparand_run():
@@ -813,7 +855,7 @@ index 8344a2d..800e48a 100644
      """
      cfg = load_config(REPO / "config.yaml")
 -    assert run_id(cfg, _input_digests(cfg)) == "4cf47a918dd8"
-+    assert run_id(cfg, _input_digests(cfg)) == "597f02571f3e"
++    assert run_id(cfg, _input_digests(cfg)) == "dd7337e89047"
  
  
  def test_no_scoring_regime_gained_or_lost_a_score(fixture_run):
@@ -839,7 +881,7 @@ ERROR tests/unit/test_config.py
 
 ```diff
 diff --git a/src/logging_employment/config.py b/src/logging_employment/config.py
-index 8dcd9b0..5d5c181 100644
+index 8dcd9b0..f4706b6 100644
 --- a/src/logging_employment/config.py
 +++ b/src/logging_employment/config.py
 @@ -109,9 +109,9 @@ class SourcesConfig(_Strict):
@@ -882,7 +924,7 @@ index 8dcd9b0..5d5c181 100644
  
      NO EVALUATOR IS BUILT HERE, deliberately. A function whose primary argument is Stage 5's
      not-yet-designed output would fix that signature by guessing it, and three of §13.10's six
-@@ -319,6 +323,110 @@ class PromotionConfig(_Strict):
+@@ -319,6 +323,118 @@ class PromotionConfig(_Strict):
      minimum_wape_improvement: float = 0.05
      maximum_major_stratum_wape_degradation: float = 0.02
      nominal_coverage_tolerance: float = 0.05
@@ -897,9 +939,16 @@ index 8dcd9b0..5d5c181 100644
 +    and so in `runs.run_id`, deliberately: a prior changes every draw the model writes. The values
 +    are weakly informative on the log employees-per-establishment scale, where D1's observed cells
 +    have mean 1.46 and SD 0.48 (measured 2026-09-26), so `intercept_mean` centres the intercept
-+    there. Persistence is Beta(8, 2), mean 0.8, which is §11.12's "centered near 0.8". Both
-+    Student-t degrees of freedom are fixed at 5, §11.12's "fixed near 5 for the first
++    there. Both Student-t degrees of freedom are fixed at 5, §11.12's "fixed near 5 for the first
 +    implementation".
++
++    PERSISTENCE IS `persistence_max * Beta(8, 2)`: capped at 0.95, mean 0.76, §11.12's "transformed
++    Beta prior centered near 0.8". §11.2 prefers the AR(1) because Logging intensity is "plausibly
++    mean-reverting". Uncapped, D1's persistence reached 0.978 and a production fit failed §11.14's
++    R-hat on one of two seeds; capped, both passed (plan 16, Decision 15). 1.0 removes the cap.
++
++    THERE IS NO OBSERVATION SCALE. Training cells are exact (§11.3), so §11.3's `sigma_y` and its
++    degrees of freedom are not parameters of the model.
 +    """
 +
 +    intercept_mean: float = 1.5
@@ -910,11 +959,10 @@ index 8dcd9b0..5d5c181 100644
 +    year_scale_sd: float = 0.25
 +    persistence_concentration1: float = 8.0
 +    persistence_concentration0: float = 2.0
++    persistence_max: float = Field(default=0.95, gt=0.0, le=1.0)
 +    innovation_scale_sd: float = 0.1
 +    innovation_dispersion_sd: float = 0.5
 +    innovation_df: float = 5.0
-+    observation_scale_sd: float = 0.1
-+    observation_df: float = 5.0
 +
 +
 +class StateModelDiagnostics(_Strict):
@@ -922,11 +970,13 @@ index 8dcd9b0..5d5c181 100644
 +
 +    §11.14 gives R-hat "at or below 1.01" and asks for "adequate effective sample size" without a
 +    number. `min_ess_per_chain` fills that gap with the convention of 100 per chain, so the floor is
-+    400 at Appendix A's four chains. `min_ppc_coverage_90` is a floor on the share of observed cells
-+    that fall inside their own 90% posterior predictive interval. It is a floor only: in-sample
-+    predictive coverage above nominal is expected, and a fit that misses more than 15% of its own
-+    training cells is misspecified. `max_divergences` is 0 because §11.14 says "no unresolved
-+    divergent transitions".
++    400 at Appendix A's four chains. `min_ppc_coverage_90` is a floor on the share of training cells
++    inside their 90% ONE-STEP-AHEAD predictive interval, predicted from the month before. Training
++    cells are exact (§11.3), so an in-sample replicate of a training cell is y itself and could not
++    fail. It is a floor only: coverage above nominal means the innovation law is wider than the
++    data's month-to-month moves, which widens intervals without understating them, while a fit
++    that misses more than 15% of its training cells' moves understates them. `max_divergences` is 0
++    because §11.14 says "no unresolved divergent transitions".
 +    """
 +
 +    max_rhat: float = 1.01
@@ -993,7 +1043,7 @@ index 8dcd9b0..5d5c181 100644
  
  
  class Config(_Strict):
-@@ -331,6 +439,7 @@ class Config(_Strict):
+@@ -331,6 +447,7 @@ class Config(_Strict):
      reconciliation: ReconciliationConfig
      baselines: BaselinesConfig
      disclosure: DisclosureConfig
@@ -1007,7 +1057,7 @@ index 8dcd9b0..5d5c181 100644
 
 ```diff
 diff --git a/config.yaml b/config.yaml
-index 45791f6..88f3de3 100644
+index 45791f6..bab0217 100644
 --- a/config.yaml
 +++ b/config.yaml
 @@ -9,12 +9,13 @@
@@ -1030,7 +1080,7 @@ index 45791f6..88f3de3 100644
  project:
    name: 'logging-state-employment'
    industry_code_supplied: '1113310'
-@@ -104,7 +105,44 @@ validation:
+@@ -104,7 +105,43 @@ validation:
    naics_seam_month: '2022-01'
    naics_seam_halfwidth_months: 3
  
@@ -1058,11 +1108,10 @@ index 45791f6..88f3de3 100644
 +    year_scale_sd: 0.25
 +    persistence_concentration1: 8.0
 +    persistence_concentration0: 2.0
++    persistence_max: 0.95
 +    innovation_scale_sd: 0.1
 +    innovation_dispersion_sd: 0.5
 +    innovation_df: 5.0
-+    observation_scale_sd: 0.1
-+    observation_df: 5.0
 +  diagnostics:
 +    max_rhat: 1.01
 +    min_ess_per_chain: 100
@@ -1090,7 +1139,7 @@ uv run python -c "from pathlib import Path; from logging_employment.config impor
 uv run logging-estimates validate-config --config config.yaml
 ```
 
-Expected: `5506f8876841 597f02571f3e`, then `validate-config` exits 0. If the second id is not `597f02571f3e`, `data/staged` is not the five tables Task 0 listed. **Stop**: Task 15's byte comparison assumes exactly this re-id and no other.
+Expected: `14352bb8e56e dd7337e89047`, then `validate-config` exits 0. If the second id is not `dd7337e89047`, `data/staged` is not the five tables Task 0 listed. **Stop**: Task 15's byte comparison assumes exactly this re-id and no other.
 
 - [ ] **Step 6: Gates**
 
@@ -1137,7 +1186,7 @@ git commit -m "feat(config): declare Appendix A's model block and re-id every ru
     - `predict_cell_ids: tuple[str, ...]` (seven-field `cell_id`s, in (month, state) order);
     - `log_exposure_centre`, `log_exposure_scale`.
   - `models.interfaces.StateModelConfig.from_config(model: ModelConfig)`, a frozen dataclass of the fit's settings.
-  - `models.interfaces.StateModelFit`: `raw_scores: PosteriorDraws`, `parameters: dict[str, np.ndarray]` shaped `(chains, draws, ...)`, `diverging: np.ndarray` `(chains, draws)`, `ppc_coverage_90: float`, `ppc_cells: int`, `posterior_medians: dict[str, float]`, `sampler: dict[str, object]`, and the properties `chains`, `divergences`.
+  - `models.interfaces.StateModelFit`: `raw_scores: PosteriorDraws`, `parameters: dict[str, np.ndarray]` shaped `(chains, draws, ...)`, `diverging: np.ndarray` `(chains, draws)`, `ppc_coverage_90: float`, `ppc_cells: int`, `posterior_medians: dict[str, float]` (σ_η and ρ, Decision 15), `sampler: dict[str, object]`, and the properties `chains`, `divergences`.
   - The constants `MODEL_ID = "state_total_model"`, `MODEL_VERSION = "student_t_ar1.1"`, `STORE_PATH = "posterior/state_total_draws.nc"`.
   - `models.data.build_model_data(monthly: pl.DataFrame) -> ModelData`, `models.data.state_cell_ids(frame) -> tuple[str, ...]`, and `TRAINING_STATUS = "observed"` / `PREDICTION_STATUS = "suppressed"`.
   - `baselines.runner.missing_cell_ids(partition: Partition) -> dict[str, str]`.
@@ -1497,11 +1546,13 @@ class StateModelFit:
     maps each draw into the feasible set before anything summarises it.
 
     `parameters` maps each monitored parameter's name to an array shaped `(chains, draws, ...)`,
-    the layout `arviz_io` reads. The latent innovations are excluded: there are 4,800 per draw on
-    D1, and no released summary is computed from them.
+    the layout `arviz_io` reads. The latent innovations are excluded: there is one per cell no
+    training value pins, 1,338 per draw on D1, and no released summary is computed from them.
 
-    `posterior_medians` holds the scalar scales a reviewer needs to judge the §11.5 score: the
-    median of `sigma_y` against `sigma_eta`, recorded because §11.5's q omits `sigma_y`.
+    `posterior_medians` holds two scalars a reviewer needs to read the fit, each a median over
+    draws and states: the innovation scale `sigma_eta` and the persistence `rho`. Persistence
+    decides how far a suppressed gap reverts toward the state level, and a median pressed against
+    `persistence_max` says the cap binds.
     """
 
     raw_scores: PosteriorDraws
@@ -1716,21 +1767,22 @@ git commit -m "feat(models): ModelData and the fit's interfaces, with suppressed
 
 ### Task 4: The robust hierarchical state-intensity model, in NumPyro
 
-**Implements:**
-- §11.1's mean (less H, Decision 7);
-- §11.2's AR(1) with Student-t innovations and state-specific persistence and scale;
-- §11.3's Student-t observation model on training cells only;
+**Implements:** Decision 15's model. Four of its choices read the spec differently from its text, and Decision 7 flags each.
+- §11.1's mean, less H (Decision 7), with X as a within-state and a between-state part (Decision 15);
+- §11.2's AR(1) with Student-t innovations and state-specific persistence and scale, persistence capped at `persistence_max` (Decision 15);
+- §11.3's first sentence: training cells are exact. The path is pinned there, and the likelihood is the AR(1) density of the innovations the pinning implies. There is no σ_y (Decision 15);
 - §11.5's score, literally (Decision 6);
 - §11.12's priors, all from config;
-- §11.14's "SHOULD use noncentered parameterizations and vectorized state/time operations";
+- §11.14's "vectorized state/time operations", and its non-centred SHOULD for every state no training cell pins. A trained state samples its level and log scale directly (Decision 15);
+- §11.14's posterior predictive check, as the one-step-ahead check an exact-observation model admits (Decision 5);
 - §2.2's backend row, as `BACKENDS`;
 - §16.2's `fit_state_total_model`.
 
-The toy tests exercise determinism, shape, the likelihood's scope and the priors. They are part of the hermetic tier: two chains of 40 draws on a twelve-cell panel cost compile time, about 14 s for the module when observed. Recovery is Task 10's.
+The toy tests exercise determinism, shape, the likelihood's scope, the likelihood's VALUE against SciPy, the cap and the priors. They are part of the hermetic tier: two chains of 40 draws on a twelve-cell panel cost compile time, about 13 s for the module when observed. Recovery is Task 10's.
 
 **Files:**
 - Create: `src/logging_employment/models/state_total.py`
-- Test: `tests/unit/test_state_total_model.py` (new; 10 tests)
+- Test: `tests/unit/test_state_total_model.py` (new; 13 tests)
 
 **Interfaces:**
 - Consumes: Task 3's `ModelData`, `StateModelConfig`, `StateModelFit`, `MODEL_ID`, `MODEL_VERSION`; `reconcile.draws.PosteriorDraws`.
@@ -1738,6 +1790,9 @@ The toy tests exercise determinism, shape, the likelihood's scope and the priors
   - `fit_state_total_model(data: ModelData, config: StateModelConfig) -> StateModelFit`;
   - `state_total_model(data, config, y=None)`, the NumPyro program;
   - `raw_scores(exposure, mu) -> np.ndarray`, §11.5's q, shaped (draws, cells);
+  - `training_grid(data) -> np.ndarray`, the states × months mask of pinned cells;
+  - `state_mean_exposure(data) -> np.ndarray`, x̄ per state, over training and prediction cells;
+  - `one_step_scale(rho, scale, train_state, train_month) -> np.ndarray`, each training cell's one-step predictive scale per draw;
   - `prior_predictive(data, config, *, num_samples) -> np.ndarray`;
   - `MONITORED`, the 15 parameter names whose R-hat §11.14 gates;
   - `BACKENDS: dict[str, Callable]`, `CHAIN_METHOD = "vectorized"`, `MAX_TREE_DEPTH = 10`.
@@ -1763,12 +1818,14 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from numpyro import handlers
+from scipy import stats
 
 from logging_employment.config import ModelConfig
 from logging_employment.errors import ConceptViolationError
 from logging_employment.models.interfaces import ModelData, StateModelConfig, StateModelFit
 from logging_employment.models.state_total import (
     fit_state_total_model,
+    one_step_scale,
     prior_predictive,
     raw_scores,
     state_total_model,
@@ -1865,6 +1922,13 @@ def test_monitored_parameters_keep_their_chain_and_draw_axes(tiny_fit: StateMode
     np.testing.assert_allclose(tiny_fit.parameters["gamma"].sum(axis=-1), 0.0, atol=1e-10)
 
 
+def test_persistence_never_reaches_its_cap(tiny_fit: StateModelFit) -> None:
+    """rho = persistence_max * Beta, so no draw may sit at or above the cap."""
+    rho = tiny_fit.parameters["rho"]
+    assert float(rho.max()) < TINY.priors.persistence_max
+    assert float(rho.min()) > 0.0
+
+
 def test_the_fit_records_its_sampler_and_its_predictive_check(tiny_fit: StateModelFit) -> None:
     assert tiny_fit.sampler["chain_method"] == "vectorized"
     assert tiny_fit.sampler["seed"] == TINY.seed
@@ -1874,7 +1938,7 @@ def test_the_fit_records_its_sampler_and_its_predictive_check(tiny_fit: StateMod
     assert tiny_fit.chains == 2
     assert tiny_fit.ppc_cells == len(TRAIN)
     assert 0.0 <= tiny_fit.ppc_coverage_90 <= 1.0
-    assert set(tiny_fit.posterior_medians) == {"sigma_y", "sigma_eta"}
+    assert set(tiny_fit.posterior_medians) == {"sigma_eta", "rho"}
 
 
 def test_the_score_is_section_11_5_literally() -> None:
@@ -1884,14 +1948,86 @@ def test_the_score_is_section_11_5_literally() -> None:
 
 
 def test_no_suppressed_cell_is_an_observation(toy_data: ModelData) -> None:
-    """§11.3: the likelihood site is sized by the training cells, and nothing else observes."""
+    """§11.3: the likelihood has one term per training cell, and nothing else observes."""
     trace = handlers.trace(handlers.seed(state_total_model, rng_seed=0)).get_trace(
         toy_data, TINY, y=jnp.asarray(toy_data.train_y)
     )
     observed = [name for name, site in trace.items() if site.get("is_observed")]
     assert observed == ["y"]
-    assert trace["y"]["value"].shape == (len(TRAIN),)
+    assert trace["y"]["fn"].batch_shape == (len(TRAIN),)
+    # One innovation per cell the training values do not pin: the two suppressed cells.
+    assert trace["z"]["value"].shape == (len(PREDICT),)
+    # Every toy state has a training cell, so every state is sampled by its pinned level.
+    assert trace["level"]["value"].shape == (3,)
+    assert "u_raw" not in trace
     assert trace["mu_predict"]["value"].shape == (len(PREDICT),)
+
+
+def test_the_likelihood_is_the_ar1_density_of_the_pinned_path(toy_data: ModelData) -> None:
+    """§11.3 exact, §11.2 Student-t AR(1): each training cell scores the innovation y - m implies.
+
+    The expected values are computed here by a plain loop and scipy, independent of `_path`'s scan.
+    State 2's months 1 and 3 are suppressed, so its month-2 innovation is scored against a path
+    built from an innovation, and its month-3 cell is built, never scored. Every toy state has a
+    training cell, so each is sampled by its level and log scale, and m = level + gamma +
+    beta * (x - x_bar).
+    """
+    rng = np.random.default_rng(SEED + 1)
+    values = {
+        "alpha": 1.4,
+        "beta": 0.3,
+        # Enters every level, and the levels are substituted, so it cannot move the likelihood.
+        "beta_between": 0.2,
+        "sigma_u": 0.4,
+        "sigma_v": 0.2,
+        "sigma_gamma": 0.1,
+        "sigma_eta": 0.05,
+        "tau": 0.3,
+        "level": np.array([1.6, 1.1, 1.9]),
+        "log_scale": np.log(np.array([0.04, 0.06, 0.05])),
+        "rho_raw": np.array([0.7, 0.9, 0.8]),
+        "v_raw": np.array([0.6, -0.3]),
+        "gamma": rng.normal(scale=0.1, size=12),
+        "z": np.array([1.3, -0.7]),
+    }
+    trace = handlers.trace(
+        handlers.substitute(state_total_model, data={k: jnp.asarray(v) for k, v in values.items()})
+    ).get_trace(toy_data, TINY, y=jnp.asarray(toy_data.train_y))
+    scored = np.asarray(trace["y"]["fn"].log_prob(trace["y"]["value"]))
+
+    df, cap = TINY.priors.innovation_df, TINY.priors.persistence_max
+    rho = cap * values["rho_raw"]
+    scale = np.exp(values["log_scale"])
+    x = np.zeros((3, 4))
+    x[toy_data.train_state, toy_data.train_month] = toy_data.train_x
+    x[toy_data.predict_state, toy_data.predict_month] = toy_data.predict_x
+    # Every toy cell is published (trained or suppressed), so x_bar is each row's mean.
+    x_bar = x.mean(axis=1)
+    y = dict(zip(TRAIN, toy_data.train_y, strict=True))
+    innovation = dict(zip(PREDICT, values["z"], strict=True))
+    expected, eta = {}, np.zeros((3, 4))
+    for state in range(3):
+        for month in range(4):
+            within = x[state, month] - x_bar[state]
+            m = values["level"][state] + values["gamma"][month] + values["beta"] * within
+            if month == 0:
+                location, width = 0.0, scale[state] / np.sqrt(1.0 - rho[state] ** 2)
+            else:
+                location, width = rho[state] * eta[state, month - 1], scale[state]
+            if (state, month) in y:
+                eta[state, month] = y[(state, month)] - m
+                expected[(state, month)] = stats.t.logpdf(
+                    eta[state, month], df, loc=location, scale=width
+                )
+            else:
+                eta[state, month] = location + width * innovation[(state, month)]
+    np.testing.assert_allclose(scored, [expected[cell] for cell in TRAIN], rtol=1e-12)
+
+
+def test_the_one_step_scale_is_stationary_in_the_first_month() -> None:
+    """At t = 0 there is no month before, so the prediction's scale is the stationary one."""
+    got = one_step_scale(np.array([[0.6]]), np.array([[0.1]]), np.array([0, 0]), np.array([0, 5]))
+    np.testing.assert_allclose(got, [[0.125, 0.1]], rtol=1e-15)
 
 
 def test_the_prior_predictive_puts_the_response_where_logging_lives(toy_data: ModelData) -> None:
@@ -1934,24 +2070,57 @@ ERROR tests/unit/test_state_total_model.py
 ```python
 """§11.1-§11.3 and §11.5: the robust hierarchical state-intensity model, in NumPyro.
 
-THE MODEL. On training cells, y = log(E / A) ~ StudentT(nu_y, mu, sigma_y) (§11.3), where
+THE MODEL. mu[s, t] = m[s, t] + eta[s, t], where
 
-    mu[s, t] = alpha + u[s] + v[r(s)] + gamma[m(t)] + delta[y(t)] + beta * x[s, t] + eta[s, t]
+    m[s, t] = alpha + u[s] + v[r(s)] + gamma[m(t)] + delta[y(t)]
+              + beta * (x[s, t] - x_bar[s]) + beta_between * x_bar[s]
 
-is §11.1's mean less lambda_H * H. `include_harvest_factor` is false, and Stage 7 adds the factor
-and re-runs §13.10's gate. eta is an AR(1) per state with Student-t innovations of scale
-sigma_eta[s] and persistence rho[s] (§11.2):
+is §11.1's mean less lambda_H * H and less the path. X is the standardized log establishment count
+split into its within-state and between-state parts, §11.1's "nonredundant predictors": on D1 the
+two slopes differ (a state's intensity falls as its own count steps up, -1.31 per unit, and rises
+across states with count, +0.34: posterior means, plan 16's design pass), and with one beta the
+state effects had to absorb the difference. u then tracked x_bar (correlation 0.91 in a D1-like
+simulation), which breaks the exchangeable prior u ~ N(0, sigma_u) exactly where it matters: a state
+with no training cell was predicted from that prior, 2.5 log points from its true level.
+`include_harvest_factor` is false, and Stage 7 adds the factor and re-runs §13.10's gate. eta is an
+AR(1) per state with Student-t innovations of scale sigma_eta[s] and persistence rho[s] (§11.2),
+started at its stationary scale:
 
-    eta[s, 0] = sigma_eta[s] * z[s, 0] / sqrt(1 - rho[s]^2)      (stationary start)
-    eta[s, t] = rho[s] * eta[s, t-1] + sigma_eta[s] * z[s, t]      z ~ StudentT(nu_eta, 0, 1)
+    eta[s, 0] ~ t_nu(0, sigma_eta[s] / sqrt(1 - rho[s]^2))
+    eta[s, t] ~ t_nu(rho[s] * eta[s, t-1], sigma_eta[s])
 
-NON-CENTERED THROUGHOUT, as §11.14 says it SHOULD be. u, v and log sigma_eta[s] are a scale times a
-standard normal, and eta is built from unit-scale innovations. gamma and delta are ZeroSumNormal,
-so the month effects sum to zero as §11.1 requires and the year effects are identified against
-alpha.
+TRAINING CELLS ARE EXACT (§11.3's first sentence: "Published QCEW values are exact observations
+... there is no extra arbitrary measurement error"). At a training cell mu = y, so the path is
+PINNED there, eta = y - m, and the likelihood is the AR(1) density of the innovation that pinning
+implies. y -> eta is a shift, so its Jacobian is 1. Every other cell's eta is built from a unit
+innovation, rho * eta[t-1] + sigma_eta * z. There is no sigma_y. §11.3's t(mu, sigma_y) "practical
+response model" was plan 16's first implementation, and on D1 it failed §11.14's gate: sigma_y
+settled near 0.004, so the training cells pinned mu in all but name, and chains split between
+allocating state levels to u and to near-unit-root paths (plan 16, Decision 15). Pinning is that
+model's sigma_y -> 0 limit, taken in closed form.
+
+COORDINATES WHERE THE DATA PIN. Exact innovations pin three things for a state with a training cell:
+its path at those cells, its innovation scale sigma_eta[s], and its level L = alpha + u + v +
+beta_between * x_bar (`state_mean_exposure`). So those states sample `level` and `log_scale`
+directly, each from its own prior, and u = L - alpha - v - beta_between * x_bar is derived (a shear,
+Jacobian 1: the same model as u ~ N(0, sigma_u)). In the non-centred coordinates §11.14 prefers,
+alpha or sigma_u could move only if all 44 of D1's trained states' raw effects moved with it, and
+every tree hit NUTS's 1,023-step ceiling. In these, trees average about 31 steps and a production
+fit takes about two minutes. A state with no training cell is non-centred throughout (u = sigma_u *
+u_raw, log scale = log sigma_eta + tau * w), as §11.14's SHOULD says, because nothing pins it.
+
+PERSISTENCE IS CAPPED: rho = persistence_max * Beta(c1, c0), §11.12's "transformed Beta prior".
+§11.2 prefers the AR(1) to a random walk because Logging intensity is "persistent but plausibly
+mean-reverting". As rho -> 1 a state's own path pins its level less and less, and the year effects
+can trade against slow drift in the paths. On D1, uncapped, rho reached 0.978, and a production
+fit failed §11.14's R-hat on one of two seeds (delta and rho at 1.011). Capped at 0.95, both
+seeds passed at 1.005.
+
+gamma and delta are ZeroSumNormal, so the month effects sum to zero as §11.1 requires and the year
+effects are identified against alpha.
 
 THE LATENT PATH IS SAMPLED, NOT MARGINALIZED. A Kalman filter would integrate eta out, but only for
-Gaussian innovations. §11.2's Student-t shocks are the reason the path is a parameter.
+Gaussian innovations. §11.2's Student-t shocks are the reason the unpinned path is a parameter.
 
 THE SCORE IS §11.5 LITERALLY, q = A * exp(mu), computed in `raw_scores` and nowhere else.
 
@@ -1987,18 +2156,19 @@ numpyro.enable_x64()
 CHAIN_METHOD = "vectorized"
 # NUTS's default depth, passed explicitly so the saturation share below has a named ceiling. A
 # saturated tree takes 2**10 - 1 = 1023 leapfrog steps. While plan 16 was written, a
-# production-config fit of the D1 panel (4 chains, 1000 warmup, 1000 draws) hit the ceiling in
+# production-config fit of the D1 panel under §11.3's practical response model hit the ceiling in
 # 99.95% of its iterations and failed §11.14's gate, which is why every fit records how often it
 # did.
 MAX_TREE_DEPTH = 10
 EXPOSURE_OFFSET = 0.0
 MONTHS_PER_YEAR = 12
 # The parameters §11.14's R-hat is computed over, and §15.4's store keeps. The latent innovations
-# `z`, the raw normals behind the non-centered effects, and the cell means are left out: they are
-# either re-derivable from these or never summarised for release.
+# `z`, the raw draws behind the non-centered effects and the capped persistence, and the cell means
+# are left out: they are either re-derivable from these or never summarised for release.
 MONITORED: tuple[str, ...] = (
     "alpha",
     "beta",
+    "beta_between",
     "sigma_u",
     "u",
     "sigma_v",
@@ -2011,46 +2181,96 @@ MONITORED: tuple[str, ...] = (
     "sigma_eta",
     "tau",
     "sigma_eta_state",
-    "sigma_y",
 )
 
 
-def _ar1_path(z: jnp.ndarray, rho: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
-    """§11.2's eta from unit Student-t innovations, one row per state, with a stationary start.
+def training_grid(data: ModelData) -> np.ndarray:
+    """The `states x months` mask of training cells: the cells whose path is pinned."""
+    grid = np.zeros((len(data.states), len(data.months)), dtype=bool)
+    grid[data.train_state, data.train_month] = True
+    return grid
+
+
+def _path(
+    pinned: np.ndarray,
+    target: jnp.ndarray,
+    innovations: jnp.ndarray,
+    rho: jnp.ndarray,
+    scale: jnp.ndarray,
+    df: float,
+) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    """§11.2's eta month by month: pinned to `target` where `pinned`, built from `innovations` elsewhere.
+
+    Returns the path, each pinned cell's innovation log density (0 elsewhere), and each cell's
+    one-step location rho * eta[t-1] (0 at t = 0). All three are `states x months`.
 
     eta[:, 0] carries the AR(1)'s stationary scale, scale / sqrt(1 - rho^2). That is exact for
     Gaussian innovations. For Student-t innovations it is a variance-matching approximation, because
     their stationary law is not itself a scaled t. The alternative, starting every state at eta = 0,
     would pull January 2017 toward the state effect for no reason in the data.
     """
-    first = scale * z[:, 0] / jnp.sqrt(jnp.clip(1.0 - rho**2, 1e-12))
+    stationary = scale / jnp.sqrt(jnp.clip(1.0 - rho**2, 1e-12))
+    first = jnp.where(pinned[:, 0], target[:, 0], stationary * innovations[:, 0])
+    first_lp = jnp.where(
+        pinned[:, 0], dist.StudentT(df, 0.0, stationary).log_prob(target[:, 0]), 0.0
+    )
 
-    def step(previous: jnp.ndarray, innovation: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
-        """One month of eta[s, t] = rho[s] * eta[s, t-1] + scale[s] * z[s, t]."""
-        current = rho * previous + scale * innovation
-        return current, current
+    def step(
+        previous: jnp.ndarray, month: tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
+    ) -> tuple[jnp.ndarray, tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]]:
+        """One month: pin a training cell and score its innovation, or build the cell."""
+        is_pinned, pinned_value, innovation = month
+        location = rho * previous
+        current = jnp.where(is_pinned, pinned_value, location + scale * innovation)
+        log_prob = jnp.where(
+            is_pinned, dist.StudentT(df, location, scale).log_prob(pinned_value), 0.0
+        )
+        return current, (current, log_prob, location)
 
-    _, rest = jax.lax.scan(step, first, z[:, 1:].T)
-    return jnp.concatenate([first[:, None], rest.T], axis=1)
+    _, (rest, rest_lp, rest_location) = jax.lax.scan(
+        step, first, (pinned[:, 1:].T, target[:, 1:].T, innovations[:, 1:].T)
+    )
+    eta = jnp.concatenate([first[:, None], rest.T], axis=1)
+    log_prob = jnp.concatenate([first_lp[:, None], rest_lp.T], axis=1)
+    location = jnp.concatenate([jnp.zeros_like(first)[:, None], rest_location.T], axis=1)
+    return eta, log_prob, location
 
 
-def _cell_mean(
-    data: ModelData,
-    state: np.ndarray,
-    month: np.ndarray,
-    x: np.ndarray,
-    effects: dict[str, jnp.ndarray],
+def _fixed_part(
+    data: ModelData, x: np.ndarray, x_bar: np.ndarray, effects: dict[str, jnp.ndarray]
 ) -> jnp.ndarray:
-    """§11.1's mu at the given cells, less lambda_H * H, which Stage 7 adds."""
+    """§11.1's mu less lambda_H * H and less eta, on the `states x months` grid."""
     return (
         effects["alpha"]
-        + effects["u"][state]
-        + effects["v"][data.state_division[state]]
-        + effects["gamma"][data.month_of_year[month]]
-        + effects["delta"][data.year_of_month[month]]
-        + effects["beta"] * x
-        + effects["eta"][state, month]
+        + effects["u"][:, None]
+        + effects["v"][data.state_division][:, None]
+        + effects["gamma"][data.month_of_year][None, :]
+        + effects["delta"][data.year_of_month][None, :]
+        + effects["beta"] * (x - x_bar[:, None])
+        + effects["beta_between"] * x_bar[:, None]
     )
+
+
+def _exposure_grid(data: ModelData) -> np.ndarray:
+    """Standardized log exposure on the grid. A cell with no published row reads 0, and no mu there
+    is ever used: such a cell is neither trained on nor scored."""
+    x = np.zeros((len(data.states), len(data.months)))
+    x[data.train_state, data.train_month] = data.train_x
+    x[data.predict_state, data.predict_month] = data.predict_x
+    return x
+
+
+def state_mean_exposure(data: ModelData) -> np.ndarray:
+    """Each state's mean standardized log exposure over its published cells, x_bar[s].
+
+    It splits X into the between-state part x_bar, which enters a state's level through
+    `beta_between`, and the within-state part x - x_bar, which moves its path month to month through
+    `beta`.
+    """
+    states = np.concatenate([data.train_state, data.predict_state])
+    x = np.concatenate([data.train_x, data.predict_x])
+    counts = np.bincount(states, minlength=len(data.states))
+    return np.bincount(states, weights=x, minlength=len(data.states)) / np.maximum(counts, 1)
 
 
 def state_total_model(
@@ -2059,29 +2279,58 @@ def state_total_model(
     """§11.1-§11.3 as a NumPyro program. With `y=None` it draws `y` instead of conditioning on it.
 
     Every prior reads `config.priors` or `config.standardized_beta_sd`, because §11.12 says "Every
-    prior must be exposed in resolved configuration". The likelihood site `y` is shaped by the
-    TRAINING cells alone. The prediction cells enter only through the deterministic `mu_predict`, so
-    no suppressed cell is ever an observation (§11.3).
+    prior must be exposed in resolved configuration". The likelihood site `y` has one term per
+    TRAINING cell, its pinned innovation's density. A prediction cell's eta is built, never pinned,
+    so no suppressed cell is ever an observation (§11.3). With `y=None` no cell is pinned, and `y`
+    is the deterministic mu at the training cells: the prior predictive.
+
+    A state with a training cell is sampled in the coordinates its exact innovations pin: its level
+    L = alpha + u + v + beta_between * x_bar and its log innovation scale, each drawn from its own
+    prior (`level` ~ N(alpha + v + beta_between * x_bar, sigma_u) is u ~ N(0, sigma_u) sheared,
+    Jacobian 1). A
+    state with none is non-centred. The module docstring gives the measured reason.
     """
     priors = config.priors
     n_states, n_months = len(data.states), len(data.months)
+    pinned = training_grid(data) if y is not None else np.zeros((n_states, n_months), dtype=bool)
+    unpinned = np.flatnonzero(~pinned.ravel())
+    held = np.flatnonzero(pinned.any(axis=1))
+    free = np.flatnonzero(~pinned.any(axis=1))
+    x = _exposure_grid(data)
+    x_bar = state_mean_exposure(data)
     alpha = numpyro.sample("alpha", dist.Normal(priors.intercept_mean, priors.intercept_sd))
     beta = numpyro.sample("beta", dist.Normal(0.0, config.standardized_beta_sd))
+    beta_between = numpyro.sample("beta_between", dist.Normal(0.0, config.standardized_beta_sd))
     sigma_u = numpyro.sample("sigma_u", dist.HalfNormal(priors.state_scale_sd))
     sigma_v = numpyro.sample("sigma_v", dist.HalfNormal(priors.region_scale_sd))
     sigma_gamma = numpyro.sample("sigma_gamma", dist.HalfNormal(priors.month_scale_sd))
     sigma_eta = numpyro.sample("sigma_eta", dist.HalfNormal(priors.innovation_scale_sd))
     tau = numpyro.sample("tau", dist.HalfNormal(priors.innovation_dispersion_sd))
-    sigma_y = numpyro.sample("sigma_y", dist.HalfNormal(priors.observation_scale_sd))
 
     with numpyro.plate("state", n_states):
-        u_raw = numpyro.sample("u_raw", dist.Normal(0.0, 1.0))
-        w = numpyro.sample("w", dist.Normal(0.0, 1.0))
-        rho = numpyro.sample(
-            "rho", dist.Beta(priors.persistence_concentration1, priors.persistence_concentration0)
+        rho_raw = numpyro.sample(
+            "rho_raw",
+            dist.Beta(priors.persistence_concentration1, priors.persistence_concentration0),
         )
     with numpyro.plate("division", len(data.divisions)):
         v_raw = numpyro.sample("v_raw", dist.Normal(0.0, 1.0))
+    v = numpyro.deterministic("v", sigma_v * v_raw)
+    # A plate cannot be empty, so a group with no state has no site, as a one-year panel has no
+    # year effect: in the prior predictive nothing is held, and a fully trained panel frees nothing.
+    level = log_scale = u_raw = w = jnp.zeros(0)
+    if held.size:
+        with numpyro.plate("held_state", held.size):
+            level = numpyro.sample(
+                "level",
+                dist.Normal(
+                    alpha + v[data.state_division[held]] + beta_between * x_bar[held], sigma_u
+                ),
+            )
+            log_scale = numpyro.sample("log_scale", dist.Normal(jnp.log(sigma_eta), tau))
+    if free.size:
+        with numpyro.plate("free_state", free.size):
+            u_raw = numpyro.sample("u_raw", dist.Normal(0.0, 1.0))
+            w = numpyro.sample("w", dist.Normal(0.0, 1.0))
     gamma = numpyro.sample("gamma", dist.ZeroSumNormal(sigma_gamma, event_shape=(MONTHS_PER_YEAR,)))
     if len(data.years) > 1:
         sigma_delta = numpyro.sample("sigma_delta", dist.HalfNormal(priors.year_scale_sd))
@@ -2092,29 +2341,42 @@ def state_total_model(
         # A single year has nothing to contrast: a zero-sum effect over one level is identically 0.
         delta = jnp.zeros(1)
     z = numpyro.sample(
-        "z",
-        dist.StudentT(priors.innovation_df, 0.0, 1.0).expand([n_states, n_months]).to_event(2),
+        "z", dist.StudentT(priors.innovation_df, 0.0, 1.0).expand([unpinned.size]).to_event(1)
     )
 
-    sigma_eta_state = numpyro.deterministic("sigma_eta_state", sigma_eta * jnp.exp(tau * w))
+    rho = numpyro.deterministic("rho", priors.persistence_max * rho_raw)
+    u_held = level - alpha - v[data.state_division[held]] - beta_between * x_bar[held]
+    u = numpyro.deterministic(
+        "u", jnp.zeros(n_states).at[held].set(u_held).at[free].set(sigma_u * u_raw)
+    )
+    scale = numpyro.deterministic(
+        "sigma_eta_state",
+        jnp.exp(
+            jnp.zeros(n_states).at[held].set(log_scale).at[free].set(jnp.log(sigma_eta) + tau * w)
+        ),
+    )
     effects = {
         "alpha": alpha,
         "beta": beta,
-        "u": numpyro.deterministic("u", sigma_u * u_raw),
-        "v": numpyro.deterministic("v", sigma_v * v_raw),
+        "beta_between": beta_between,
+        "u": u,
+        "v": v,
         "gamma": gamma,
         "delta": delta,
-        "eta": _ar1_path(z, rho, sigma_eta_state),
     }
-    mu_train = numpyro.deterministic(
-        "mu_train", _cell_mean(data, data.train_state, data.train_month, data.train_x, effects)
-    )
-    numpyro.deterministic(
-        "mu_predict",
-        _cell_mean(data, data.predict_state, data.predict_month, data.predict_x, effects),
-    )
-    with numpyro.plate("train", data.train_y.shape[0]):
-        numpyro.sample("y", dist.StudentT(priors.observation_df, mu_train, sigma_y), obs=y)
+    m = _fixed_part(data, x, x_bar, effects)
+    target = jnp.zeros((n_states, n_months))
+    if y is not None:
+        target = target.at[data.train_state, data.train_month].set(y) - m
+    innovations = jnp.zeros(n_states * n_months).at[unpinned].set(z).reshape(n_states, n_months)
+    eta, log_prob, location = _path(pinned, target, innovations, rho, scale, priors.innovation_df)
+    mu = m + eta
+    numpyro.deterministic("mu_predict", mu[data.predict_state, data.predict_month])
+    if y is None:
+        numpyro.deterministic("y", mu[data.train_state, data.train_month])
+        return
+    numpyro.deterministic("one_step_location", (m + location)[data.train_state, data.train_month])
+    numpyro.factor("y", log_prob[data.train_state, data.train_month])
 
 
 def raw_scores(exposure: np.ndarray, mu: np.ndarray) -> np.ndarray:
@@ -2124,31 +2386,44 @@ def raw_scores(exposure: np.ndarray, mu: np.ndarray) -> np.ndarray:
     `build_model_data` refuses every A <= 0. §11.5's offset exists for zero exposure, which cannot
     reach here. It is kept as a named constant so the formula reads as the spec writes it.
 
-    THE OBSERVATION RESIDUAL IS NOT IN q. §11.5 scores exp(mu), and mu includes the state-month
-    path eta, which carries §11.2's process variation into every suppressed month. It omits
-    §11.3's sigma_y. Plan 16 keeps the literal formula and records posterior sigma_y beside
-    sigma_eta (`StateModelFit.posterior_medians`), so a reviewer can see from data whether the
-    omission is material. Adding sigma_y would be a change to this function alone.
+    NOTHING IS MISSING FROM q. mu at a suppressed cell includes the state-month path eta, which
+    carries §11.2's process variation into every suppressed month, and training cells are exact
+    (§11.3), so the model has no separate observation noise that the score could omit.
     """
     return (np.asarray(exposure, dtype=np.float64) + EXPOSURE_OFFSET) * np.exp(
         np.asarray(mu, dtype=np.float64)
     )
 
 
+def one_step_scale(
+    rho: np.ndarray, scale: np.ndarray, train_state: np.ndarray, train_month: np.ndarray
+) -> np.ndarray:
+    """Each training cell's one-step predictive scale, per draw: (draws, states) -> (draws, cells).
+
+    The innovation scale sigma_eta[s], or at t = 0 the stationary one, as `_path` scores them.
+    """
+    stationary = scale / np.sqrt(np.clip(1.0 - rho**2, 1e-12, None))
+    return np.where(train_month == 0, stationary[:, train_state], scale[:, train_state])
+
+
 def _ppc_coverage_90(
-    mu_train: np.ndarray, sigma_y: np.ndarray, df: float, y: np.ndarray, seed: int
+    location: np.ndarray, scale: np.ndarray, df: float, y: np.ndarray, seed: int
 ) -> float:
-    """The share of training cells inside their own central 90% posterior predictive interval.
+    """The share of training cells inside their central 90% ONE-STEP-AHEAD predictive interval.
 
     This is §11.14's "posterior predictive checks on observed cells", reduced to one number the gate
-    can compare. Each draw's replicate is mu + sigma_y * t_nu noise, the model's own likelihood
-    (§11.3). A NumPy generator seeded from the fit's seed draws the noise, so the check is as
-    reproducible as the draws. With no training cell it is NaN, and the gate reads NaN as a failure.
+    can compare. Training cells are exact (§11.3), so an in-sample replicate of mu IS y, and a check
+    of y against it would pass by construction. The check is instead the one a state-space model
+    admits: each draw predicts a training cell from the month before, m + rho * eta[t-1] plus a t_nu
+    innovation of the cell's `one_step_scale`, and the share of y inside its 90% interval is
+    reported. That tests the innovation law the likelihood scores. A NumPy generator seeded from the
+    fit's seed draws the innovations, so the check is as reproducible as the draws. With no training
+    cell it is NaN, and the gate reads NaN as a failure.
     """
-    if mu_train.shape[1] == 0:
+    if location.shape[1] == 0:
         return float("nan")
     rng = np.random.default_rng(seed)
-    replicate = mu_train + sigma_y[:, None] * rng.standard_t(df, size=mu_train.shape)
+    replicate = location + scale * rng.standard_t(df, size=location.shape)
     low, high = np.quantile(replicate, [0.05, 0.95], axis=0)
     return float(np.mean((y >= low) & (y <= high)))
 
@@ -2198,16 +2473,19 @@ def _fit_numpyro(data: ModelData, config: StateModelConfig) -> StateModelFit:
         parameters={name: samples[name] for name in MONITORED if name in samples},
         diverging=diverging,
         ppc_coverage_90=_ppc_coverage_90(
-            samples["mu_train"].reshape(chains * draws, -1),
-            samples["sigma_y"].reshape(-1),
-            config.priors.observation_df,
+            samples["one_step_location"].reshape(chains * draws, -1),
+            one_step_scale(
+                samples["rho"].reshape(chains * draws, -1),
+                samples["sigma_eta_state"].reshape(chains * draws, -1),
+                data.train_state,
+                data.train_month,
+            ),
+            config.priors.innovation_df,
             data.train_y,
             config.seed,
         ),
         ppc_cells=int(data.train_y.shape[0]),
-        posterior_medians={
-            name: float(np.median(samples[name])) for name in ("sigma_y", "sigma_eta")
-        },
+        posterior_medians={name: float(np.median(samples[name])) for name in ("sigma_eta", "rho")},
         sampler={
             "backend": config.backend,
             "chain_method": CHAIN_METHOD,
@@ -2253,7 +2531,8 @@ def prior_predictive(data: ModelData, config: StateModelConfig, *, num_samples: 
     """The training-cell response drawn from the priors alone, shaped (num_samples, N).
 
     This is the bayesian-workflow prior predictive check: the priors in `config.priors` must put the
-    response where log employees per establishment plausibly lives before any fit is trusted.
+    response where log employees per establishment plausibly lives before any fit is trusted. With
+    `y=None` no cell is pinned, so every path is drawn from its innovations and `y` is mu itself.
     """
     draws = Predictive(state_total_model, num_samples=num_samples)(
         jax.random.key(config.seed), data, config, y=None
@@ -2265,7 +2544,7 @@ def prior_predictive(data: ModelData, config: StateModelConfig, *, num_samples: 
 
 Run: `uv run pytest tests/unit/test_state_total_model.py -q`
 
-Expected: `10 passed`, observed on the older local environment as `10 passed`. If `test_the_same_seed_gives_bit_identical_draws` fails, something reached the model unseeded. Find it; do not loosen the test to `allclose`.
+Expected: `13 passed`, observed on the older local environment as `13 passed`. If `test_the_same_seed_gives_bit_identical_draws` fails, something reached the model unseeded. Find it; do not loosen the test to `allclose`.
 
 - [ ] **Step 5: Gates**
 
@@ -2274,7 +2553,7 @@ uv run ruff format --check src tests && uv run ruff check src tests && uv run in
 uv run pytest -q -p no:cacheprovider -m "not slow"
 ```
 
-Expected: gates clean. Non-slow suite: Task 3's count **+ 10 passed**.
+Expected: gates clean. Non-slow suite: Task 3's count **+ 13 passed**.
 
 - [ ] **Step 6: Commit**
 
@@ -2327,7 +2606,7 @@ git commit -m "feat(models): the Student-t AR(1) state-intensity model and its l
 
 ```diff
 diff --git a/tests/unit/conftest.py b/tests/unit/conftest.py
-index 21514e0..fd2faed 100644
+index 21514e0..a6d47ea 100644
 --- a/tests/unit/conftest.py
 +++ b/tests/unit/conftest.py
 @@ -9,6 +9,7 @@ from __future__ import annotations
@@ -2386,7 +2665,7 @@ index 21514e0..fd2faed 100644
 +            ),
 +            ppc_coverage_90=ppc_coverage_90,
 +            ppc_cells=0,
-+            posterior_medians={"sigma_y": 0.05, "sigma_eta": 0.1},
++            posterior_medians={"sigma_eta": 0.1, "rho": 0.8},
 +            sampler={"chain_method": "vectorized"},
 +        )
 +
@@ -3694,7 +3973,7 @@ git commit -m "feat(models): the ArviZ-shaped draws store and the R-hat/ESS stat
 - Produces:
   - `evaluate_gate(fit, draws, check, thresholds, *, scope: str) -> GateReport`, with `scope` in `SCOPES = ("production", "replicate")`.
   - `GateReport`: `scope`, `checks: tuple[GateCheck, ...]`, `cells_constant`, and the properties `passed` and `failures`. `to_json()` gives `{"scope", "passed", "failures", "cells_constant", "checks": {name: {"value", "threshold", "passed", "gating"}}}`, with NaN and inf written as null.
-  - `GateCheck(name, value, threshold, passed, gating)`. The ten check names, in order: `divergences`, `parameter_rhat_max`, `parameter_ess_bulk_min`, `parameter_ess_tail_min`, `cell_rhat_max`, `cell_ess_bulk_min`, `cell_ess_tail_min`, `ppc_coverage_90`, `reconciliation_anchor_drift_max`, `reconciliation_bound_violations`.
+  - `GateCheck(name, value, threshold, passed, gating)`. The ten check names, in order: `divergences`, `parameter_rhat_max`, `parameter_ess_bulk_min`, `parameter_ess_tail_min`, `cell_rhat_max`, `cell_ess_bulk_min`, `cell_ess_tail_min`, `ppc_coverage_90`, `reconciliation_anchor_drift_max`, `reconciliation_bound_violations`. `ppc_coverage_90` reads the one-step-ahead check Task 4 computes (Decision 5).
   - `assert_gate_passes(report) -> None`, which raises `errors.ModelDiagnosticsError` naming every failed gating check.
 
 - [ ] **Step 1: Write the failing tests**
@@ -3922,7 +4201,9 @@ WHAT EACH CHECK READS (plan 16, Decision 5):
 * `cell_ess_bulk_min` / `cell_ess_tail_min`: min over imputed cells, against
   `min_ess_per_chain * chains`. §11.14 scopes ESS to "release-relevant summaries", and the released
   summaries are these cells' intervals. Parameter ESS is recorded and does not gate.
-* `ppc_coverage_90`: `StateModelFit.ppc_coverage_90` against `min_ppc_coverage_90`.
+* `ppc_coverage_90`: `StateModelFit.ppc_coverage_90` against `min_ppc_coverage_90`. It is
+  one-step-ahead coverage of the training cells (`state_total._ppc_coverage_90`), because an exact
+  training cell's in-sample replicate is the cell itself.
 * `reconciliation_*`: `DrawCheck`, which is INV-012 measured on the draws.
 
 A cell whose reconciled draws never vary has no R-hat and no ESS. That happens in a month whose
@@ -4639,20 +4920,26 @@ git commit -m "feat(cli): fit-state-model, and reconcile re-checks the stored dr
 
 ---
 
-### Task 10: §17.5's state-total recovery rows, on a panel simulated from §11's own process
+### Task 10: §17.5's state-total recovery rows, on a panel simulated at D1's regime
 
 **Implements:**
 - §17.4 row 5, "fit a reduced Bayesian model on synthetic data";
-- §17.5's five state-total rows (state effects, region effects, seasonality, AR persistence, heavy-tailed shocks), with "parameter and predictive recovery within tolerances appropriate to sample size". The other four rows (size compositions, top-class tails, TPO/FIA measurements, missingness) belong to the size and harvest models of later stages.
+- §17.5's five state-total rows (state and region effects, through each state's level; seasonality; AR persistence; heavy-tailed shocks), with "parameter and predictive recovery within tolerances appropriate to sample size". The other four rows (size compositions, top-class tails, TPO/FIA measurements, missingness) belong to the size and harvest models of later stages.
 
-The panel has 18 states in 6 divisions over 96 months. It is drawn from §11.1–§11.3's generative process with known state and region effects, seasonality, two persistence groups (0.9 and 0.6) and Student-t shocks. Three 8-sigma jumps are injected. About 12% of cells are hidden, so they are predicted rather than trained on. Each assertion's docstring gives the arithmetic its bound comes from, so a reviewer can argue with a number rather than a feeling.
+**The panel is D1's regime, not an easier one** (Decision 15). This plan's first recovery test used a friendlier panel: every state trained, and observation noise was comparable to the innovations (σ_y 0.05 against σ_η 0.08). It passed there, and it said nothing about D1, where the model then failed. So the test reproduces what makes D1 hard:
+- Training cells are exact, and innovation scales are D1's: σ_η 0.035, dispersed across states by τ 0.8.
+- x moves between states and barely within one. It is constant within a quarter and steps by sd 0.03 at quarter boundaries. Its within-state slope is −1.2 and its between-state slope +0.4, the signs D1's posterior has.
+- Suppression takes whole quarters. Two states have no training cell, two keep only two or three quarters, and the rest lose runs of one to four quarters.
+- The panel has 18 states in 6 divisions over 96 months, two persistence groups (0.9 and 0.6, both under the cap) and three injected 8-sigma shocks.
 
-**There is no red step.** Every function this test calls exists after Task 4. It checks that the model Task 4 wrote recovers what it was simulated from, and a red run would need a broken model. Its falsifiability lies in its bounds. Two examples:
-- a sign error in beta puts the posterior near −0.3, outside `test_heavy_tailed_shocks_leave_the_innovation_scale_recovered`'s interval around 0.3;
-- a model with one shared persistence cannot separate the two groups by 0.1.
+Each assertion's docstring gives the arithmetic its bound comes from, so a reviewer can argue with a number rather than a feeling.
+
+**There is no red step.** Every function this test calls exists after Task 4. It checks that the model Task 4 wrote recovers what it was simulated from, and a red run would need a broken model. Its falsifiability was measured, not argued:
+- With one β for both slopes, which was the model before Decision 15's split, two of these tests failed. In `test_untrained_state_levels_fall_inside_their_wide_intervals`, an untrained state's true level sat 2.5 log points from its posterior mean, outside its 95% interval. In `test_hidden_cells_are_predicted_within_their_intervals`, 90% coverage was 0.74 over all hidden cells and 0.50 in the untrained states.
+- A model with one shared persistence cannot separate the two groups by 0.1 (`test_ar_persistence_separates_the_two_groups`).
 
 **Files:**
-- Test: `tests/integration/test_state_total_recovery.py` (new; 7 tests, the module marked `slow`)
+- Test: `tests/integration/test_state_total_recovery.py` (new; 10 tests, the module marked `slow`)
 
 **Interfaces:**
 - Consumes: Task 3's `ModelData`, `StateModelConfig` and `StateModelFit`; Task 4's `fit_state_total_model`; Task 7's `rank_rhat`; `config.ModelConfig`.
@@ -4665,11 +4952,21 @@ The panel has 18 states in 6 divisions over 96 months. It is drawn from §11.1�
 ```python
 """§17.5's state-total rows: the fit recovers the parameters it was simulated from (§17.4 row 5).
 
-The panel is drawn from §11.1-§11.3's own generative process: 18 states in 6 divisions over 96
-months, with known state effects, region effects, seasonality, two persistence groups and Student-t
-shocks, plus three injected 8-sigma jumps. About 12% of cells are hidden, and so predicted rather
-than trained on. "Within tolerances appropriate to sample size" (§17.5) is read one row at a time,
-and each assertion's comment gives the arithmetic its bound comes from.
+The panel is drawn from §11.1-§11.3's own generative process AT D1'S REGIME, because a recovery test
+at an easier one says nothing about D1 (plan 16, Decision 15). What makes D1 hard is reproduced:
+
+* training cells are exact (§11.3), and innovation scales are D1's: sigma_eta 0.035, dispersed
+  across states by tau 0.8, so a state's scale runs from about 0.01 to 0.1;
+* x, the standardized log establishment count, moves between states and barely within one. It is
+  constant within a quarter and steps at quarter boundaries, as QCEW's exposure does, and its
+  within-state and between-state slopes differ in sign, as on D1 (posterior means -1.31 and
+  +0.34), so the model must split them;
+* suppression takes whole quarters: two states have no training cell, two keep two or three
+  quarters, and the rest lose runs of one to four quarters.
+
+18 states in 6 divisions over 96 months, with three injected 8-sigma shocks. "Within tolerances
+appropriate to sample size" (§17.5) is read one row at a time, and each assertion's comment gives
+the arithmetic its bound comes from.
 """
 
 from __future__ import annotations
@@ -4682,7 +4979,7 @@ import pytest
 from logging_employment.config import ModelConfig
 from logging_employment.models.arviz_io import rank_rhat
 from logging_employment.models.interfaces import ModelData, StateModelConfig, StateModelFit
-from logging_employment.models.state_total import fit_state_total_model
+from logging_employment.models.state_total import fit_state_total_model, state_mean_exposure
 
 pytestmark = pytest.mark.slow
 
@@ -4690,33 +4987,54 @@ SEED = sum(map(ord, "tests/state-total-recovery"))
 SAMPLER = replace(StateModelConfig.from_config(ModelConfig()), chains=4, warmup=500, draws=500)
 DIVISIONS, PER_DIVISION, YEARS = 6, 3, 8
 STATES, MONTHS = DIVISIONS * PER_DIVISION, 12 * YEARS
-ALPHA, BETA, SIGMA_ETA, SIGMA_Y, DF = 1.4, 0.3, 0.08, 0.05, 5.0
+ALPHA, SIGMA_ETA, TAU, DF = 1.6, 0.035, 0.8, 5.0
+BETA, BETA_BETWEEN, SIGMA_U = -1.2, 0.4, 0.35
 V = np.array([0.6, 0.3, 0.0, -0.1, -0.3, -0.5])
-GAMMA = 0.2 * np.sin(2.0 * np.pi * np.arange(12) / 12.0)
-DELTA = np.array([0.1, -0.05, 0.0, 0.05, -0.1, 0.02, -0.02, 0.0])
-# Two persistence groups, alternating so neither lines up with a division.
+GAMMA = 0.02 * np.sin(2.0 * np.pi * np.arange(12) / 12.0)
+DELTA = np.array([0.06, 0.04, 0.035, 0.02, 0.0, -0.03, -0.05, -0.075])
+DELTA = DELTA - DELTA.mean()
+# Two persistence groups, alternating so neither lines up with a division. Both sit under the cap.
 RHO = np.where(np.arange(STATES) % 2 == 0, 0.9, 0.6)
 SHOCKS = ((2, 30), (7, 55), (12, 80))
+UNTRAINED = (4, 13)
+SPARSE = {9: (5, 6), 16: (10, 11, 12)}  # state -> the only quarters it trains on
+
+
+def _mask(rng: np.random.Generator) -> np.ndarray:
+    """Training cells, whole quarters at a time, in D1's pattern."""
+    quarters = MONTHS // 3
+    trained = np.ones((STATES, quarters), dtype=bool)
+    for state in range(STATES):
+        if state in UNTRAINED:
+            trained[state] = False
+        elif state in SPARSE:
+            trained[state] = False
+            trained[state, list(SPARSE[state])] = True
+        else:
+            for _ in range(rng.integers(0, 3)):
+                start, length = rng.integers(0, quarters), rng.integers(1, 5)
+                trained[state, start : start + length] = False
+    return np.repeat(trained, 3, axis=1)
 
 
 def _simulate() -> tuple[ModelData, dict[str, np.ndarray]]:
     rng = np.random.default_rng(SEED)
     division = np.repeat(np.arange(DIVISIONS), PER_DIVISION)
-    u = rng.normal(0.0, 0.1, size=STATES)
-    base = rng.integers(5, 50, size=STATES).astype(float)
-    # Exposure moves within a state over time, which is what identifies beta apart from u.
-    log_a = np.log(base)[:, None] + 0.3 * rng.standard_normal((STATES, MONTHS))
-    exposure = np.maximum(np.round(np.exp(log_a)), 1.0)
+    base = np.log(rng.integers(5, 500, size=STATES).astype(float))
+    steps = rng.normal(0.0, 0.03, size=(STATES, MONTHS // 3))
+    log_a = np.repeat(base[:, None] + np.cumsum(steps, axis=1), 3, axis=1)
+    centre, scale = float(log_a.mean()), float(log_a.std())
+    x = (log_a - centre) / scale
+    x_bar = x.mean(axis=1)
+    u = rng.normal(0.0, SIGMA_U, size=STATES)
+    state_scale = SIGMA_ETA * np.exp(TAU * rng.standard_normal(STATES))
     z = rng.standard_t(DF, size=(STATES, MONTHS))
     for state, month in SHOCKS:
         z[state, month] = 8.0
     eta = np.empty((STATES, MONTHS))
-    eta[:, 0] = SIGMA_ETA * z[:, 0] / np.sqrt(1.0 - RHO**2)
+    eta[:, 0] = state_scale * z[:, 0] / np.sqrt(1.0 - RHO**2)
     for month in range(1, MONTHS):
-        eta[:, month] = RHO * eta[:, month - 1] + SIGMA_ETA * z[:, month]
-    log_exposure = np.log(exposure)
-    centre, scale = float(log_exposure.mean()), float(log_exposure.std())
-    x = (log_exposure - centre) / scale
+        eta[:, month] = RHO * eta[:, month - 1] + state_scale * z[:, month]
     month_of_year = np.arange(MONTHS) % 12
     year_of_month = np.arange(MONTHS) // 12
     mu = (
@@ -4724,13 +5042,14 @@ def _simulate() -> tuple[ModelData, dict[str, np.ndarray]]:
         + (u + V[division])[:, None]
         + GAMMA[month_of_year][None, :]
         + DELTA[year_of_month][None, :]
-        + BETA * x
+        + BETA * (x - x_bar[:, None])
+        + BETA_BETWEEN * x_bar[:, None]
         + eta
     )
-    y = mu + SIGMA_Y * rng.standard_t(DF, size=(STATES, MONTHS))
-    hidden = rng.random((STATES, MONTHS)) < 0.12
-    train_s, train_t = np.nonzero(~hidden)
-    predict_s, predict_t = np.nonzero(hidden)
+    trained = _mask(rng)
+    train_s, train_t = np.nonzero(trained)
+    predict_s, predict_t = np.nonzero(~trained)
+    exposure = np.exp(log_a)
     data = ModelData(
         states=tuple(f"{s:02d}" for s in range(STATES)),
         months=tuple(f"{2017 + t // 12}-{t % 12 + 1:02d}" for t in range(MONTHS)),
@@ -4741,7 +5060,7 @@ def _simulate() -> tuple[ModelData, dict[str, np.ndarray]]:
         year_of_month=year_of_month.astype(np.int64),
         train_state=train_s.astype(np.int64),
         train_month=train_t.astype(np.int64),
-        train_y=y[train_s, train_t],
+        train_y=mu[train_s, train_t],
         train_x=x[train_s, train_t],
         predict_state=predict_s.astype(np.int64),
         predict_month=predict_t.astype(np.int64),
@@ -4751,7 +5070,12 @@ def _simulate() -> tuple[ModelData, dict[str, np.ndarray]]:
         log_exposure_centre=centre,
         log_exposure_scale=scale,
     )
-    truth = {"u": u, "division": division, "mu_hidden": mu[predict_s, predict_t]}
+    truth = {
+        "level": ALPHA + u + V[division] + BETA_BETWEEN * x_bar,
+        "state_scale": state_scale,
+        "mu_hidden": mu[predict_s, predict_t],
+        "trained": trained.any(axis=1),
+    }
     return data, truth
 
 
@@ -4767,6 +5091,13 @@ def _flat(fit: StateModelFit, name: str) -> np.ndarray:
     return values.reshape(values.shape[0] * values.shape[1], *values.shape[2:])
 
 
+def _level(data: ModelData, fit: StateModelFit) -> np.ndarray:
+    """Each state's level alpha + u + v[r(s)] + beta_between * x_bar[s], per draw."""
+    v = _flat(fit, "v")[:, data.state_division]
+    between = _flat(fit, "beta_between")[:, None] * state_mean_exposure(data)[None, :]
+    return _flat(fit, "alpha")[:, None] + _flat(fit, "u") + v + between
+
+
 def test_the_sampler_mixed_well_enough_for_recovery_to_mean_anything(recovered) -> None:
     """Looser than §11.14's 1.01: this test asks about recovery, and D1 owns the gate."""
     _data, _truth, fit = recovered
@@ -4778,49 +5109,71 @@ def test_the_sampler_mixed_well_enough_for_recovery_to_mean_anything(recovered) 
     assert fit.divergences == 0
 
 
-def test_state_effects_are_recovered(recovered) -> None:
-    """Level sd across states is about 0.4, and a state's posterior sd about 0.08 at rho 0.9, so
-    the correlation should sit near 0.99. Coverage allows two misses in eighteen."""
+def test_trained_state_levels_are_recovered(recovered) -> None:
+    """Exact innovations pin a trained state's level to about scale / ((1 - rho) * sqrt(n)), 0.04
+    at rho 0.9 and 96 months, against a spread of about 0.5 across states. So the correlation should
+    sit near 0.99, and 95% intervals allow one miss among the sixteen trained states."""
     data, truth, fit = recovered
-    level = _flat(fit, "alpha")[:, None] + _flat(fit, "u") + _flat(fit, "v")[:, data.state_division]
-    true_level = ALPHA + truth["u"] + V[truth["division"]]
-    assert np.corrcoef(level.mean(axis=0), true_level)[0, 1] >= 0.95
+    level = _level(data, fit)
+    trained = truth["trained"]
+    assert np.corrcoef(level.mean(axis=0)[trained], truth["level"][trained])[0, 1] >= 0.95
     low, high = np.quantile(level, [0.025, 0.975], axis=0)
-    assert int(np.sum((true_level >= low) & (true_level <= high))) >= 16
+    hit = (truth["level"] >= low) & (truth["level"] <= high)
+    assert int(np.sum(hit[trained])) >= int(trained.sum()) - 1
 
 
-def test_region_effects_are_recovered(recovered) -> None:
-    """Centred, because alpha absorbs their mean. Each division's error sd is about 0.07 (three
-    states), so 0.25 is more than three sd for each of the six."""
+def test_untrained_state_levels_fall_inside_their_wide_intervals(recovered) -> None:
+    """A state with no training cell is known only through beta_between * x_bar, v and the u
+    prior, so its interval spans about +/- 2 sigma_u. Both untrained states' true levels must fall
+    inside. With one beta for both slopes, one fell 2.5 log points below its interval's centre."""
+    data, truth, fit = recovered
+    low, high = np.quantile(_level(data, fit), [0.025, 0.975], axis=0)
+    for state in UNTRAINED:
+        assert low[state] <= truth["level"][state] <= high[state]
+
+
+def test_beta_is_recovered_from_the_quarterly_steps(recovered) -> None:
+    """Hundreds of trained quarter steps of sd 0.03 in log A, scored against innovations of sd about
+    0.035, identify beta: its interval must hold the truth and be narrow beside |beta| = 1.2."""
     _data, _truth, fit = recovered
-    v = _flat(fit, "v").mean(axis=0)
-    estimated, true = v - v.mean(), V - V.mean()
-    assert np.corrcoef(estimated, true)[0, 1] >= 0.9
-    assert float(np.max(np.abs(estimated - true))) <= 0.25
+    low, high = np.quantile(_flat(fit, "beta"), [0.025, 0.975])
+    assert low <= BETA <= high
+    assert high - low <= 0.5
 
 
-def test_seasonality_is_recovered(recovered) -> None:
-    """144 observations per calendar month, at an innovation sd near 0.1: an error near 0.01."""
+def test_the_between_state_slope_is_recovered(recovered) -> None:
+    """Sixteen trained levels, spread about 1 in x_bar around a residual sd of 0.35, identify
+    beta_between to about 0.35 / 4 = 0.09. Its interval must hold the truth and exclude the within
+    slope, which is the confusion the split exists to prevent."""
     _data, _truth, fit = recovered
-    gamma = _flat(fit, "gamma").mean(axis=0)
-    assert float(np.max(np.abs(gamma - GAMMA))) <= 0.05
-    assert np.corrcoef(gamma, GAMMA)[0, 1] >= 0.95
+    low, high = np.quantile(_flat(fit, "beta_between"), [0.025, 0.975])
+    assert low <= BETA_BETWEEN <= high
+    assert low > BETA
+
+
+def test_seasonality_and_year_effects_are_recovered(recovered) -> None:
+    """Both rest on thousands of exact innovations, so their errors are a few hundredths at most."""
+    _data, _truth, fit = recovered
+    assert float(np.max(np.abs(_flat(fit, "gamma").mean(axis=0) - GAMMA))) <= 0.01
+    assert float(np.max(np.abs(_flat(fit, "delta").mean(axis=0) - DELTA))) <= 0.03
 
 
 def test_ar_persistence_separates_the_two_groups(recovered) -> None:
-    """Beta(8, 2) pulls every state toward 0.8, so exact recovery is not the test. The posterior
-    means should separate 0.9 from 0.6 by about 0.2 (0.89 against 0.67 by conjugate arithmetic)."""
+    """The Beta prior pulls every state toward its mean, so exact recovery is not the test. The
+    posterior means should still separate 0.9 from 0.6 by more than 0.1."""
     _data, _truth, fit = recovered
     rho = _flat(fit, "rho").mean(axis=0)
     assert float(rho[RHO == 0.9].mean() - rho[RHO == 0.6].mean()) >= 0.1
 
 
-def test_heavy_tailed_shocks_leave_the_innovation_scale_recovered(recovered) -> None:
-    """Student-t innovations absorb the three 8-sigma jumps, so the innovation scale stays put."""
-    _data, _truth, fit = recovered
-    assert 0.7 * SIGMA_ETA <= float(np.median(_flat(fit, "sigma_eta"))) <= 1.3 * SIGMA_ETA
-    beta = _flat(fit, "beta")
-    assert float(np.quantile(beta, 0.025)) <= BETA <= float(np.quantile(beta, 0.975))
+def test_state_innovation_scales_are_recovered(recovered) -> None:
+    """Student-t innovations absorb the three 8-sigma jumps, so each trained state's scale stays
+    within 40% of its truth, except at most two: a sparse state's scale rests on a few steps."""
+    _data, truth, fit = recovered
+    ratio = np.median(_flat(fit, "sigma_eta_state"), axis=0) / truth["state_scale"]
+    trained = truth["trained"]
+    within = (ratio[trained] >= 0.6) & (ratio[trained] <= 1.4)
+    assert int(np.sum(within)) >= int(trained.sum()) - 2
 
 
 def test_hidden_cells_are_predicted_within_their_intervals(recovered) -> None:
@@ -4830,14 +5183,23 @@ def test_hidden_cells_are_predicted_within_their_intervals(recovered) -> None:
     low, high = np.quantile(mu, [0.05, 0.95], axis=0)
     covered = float(np.mean((truth["mu_hidden"] >= low) & (truth["mu_hidden"] <= high)))
     assert covered >= 0.8
-    assert float(np.median(np.abs(np.median(mu, axis=0) - truth["mu_hidden"]))) <= 0.1
+    in_trained = truth["trained"][data.predict_state]
+    error = np.abs(np.median(mu, axis=0) - truth["mu_hidden"])
+    assert float(np.median(error[in_trained])) <= 0.1
+
+
+def test_the_one_step_check_is_near_nominal(recovered) -> None:
+    """The one-step check replays the fit's own innovation law on data drawn from that law, so its
+    coverage should sit near 0.9."""
+    _data, _truth, fit = recovered
+    assert 0.85 <= fit.ppc_coverage_90 <= 0.97
 ```
 
 - [ ] **Step 2: Run it**
 
 Run: `uv run pytest tests/integration/test_state_total_recovery.py -q`
 
-Expected: `7 passed`, in about seven minutes: 4 chains of 500 warmup and 500 draws. It was observed passing on the older local environment (`7 passed`). That fit also ran at the tree-depth ceiling, like D1's (Decision 15), and still recovered every row.
+Expected: `10 passed`: one fit of 4 chains of 500 warmup and 500 draws. It was observed passing on the older local environment (`10 passed`). When observed, the module took 34 s, almost all of it the fit: 31 leapfrog steps a draw, no tree at the depth ceiling, no divergence, and one-step coverage 0.914 over its 1,287 training cells. The first version of this test, on the friendlier panel and §11's original model, took 391 s with every tree at the ceiling.
 
 If one assertion fails, **do not widen its bound to pass.** Read the docstring's arithmetic, decide whether the bound or the model is wrong, and stop and report to your human partner with the observed value. A recovery test loosened until it passes is a smoke test with extra steps.
 
@@ -4848,13 +5210,13 @@ uv run ruff format --check src tests && uv run ruff check src tests && uv run in
 uv run pytest -q -p no:cacheprovider -m "not slow"
 ```
 
-Expected: gates clean. Non-slow suite: **unchanged from Task 9**, because the whole module is `slow`. The seven ran in Step 2.
+Expected: gates clean. Non-slow suite: **unchanged from Task 9**, because the whole module is `slow`. The ten ran in Step 2.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add tests/integration/test_state_total_recovery.py
-git commit -m "test(models): §17.5's state-total recovery rows on a simulated panel"
+git commit -m "test(models): §17.5's state-total recovery rows on a panel at D1's regime"
 ```
 
 ---
@@ -7054,7 +7416,7 @@ index bb1c4c7..ee8dda8 100644
 
 ```diff
 diff --git a/src/logging_employment/config.py b/src/logging_employment/config.py
-index 5d5c181..03093b5 100644
+index f4706b6..f1f91cb 100644
 --- a/src/logging_employment/config.py
 +++ b/src/logging_employment/config.py
 @@ -287,35 +287,23 @@ class ValidationConfig(_Strict):
@@ -7554,10 +7916,15 @@ about to change before you change it.
   (§12.2 since `D-120`). Its implied ceiling never enters `deterministic_bounds`. §7.11's table has
   no `anchor_basis` column, so the basis rides in `state_model_manifest.json` (`anchor_bases`) and
   in the store's `constant_data`.
-- **σ_y is not in the score.** §11.5 scores `exp(mu)`, and mu carries the state-month path eta, so
-  process variation reaches every suppressed month, but §11.3's observation scale does not. Plan 16
-  keeps the literal formula (Decision 6) and records the posterior medians of `sigma_y` and
-  `sigma_eta` in the manifest so a reviewer can judge whether the omission matters.
+- **Training cells are exact; there is no σ_y.** §11.3's first sentence governs: at a training cell
+  mu = y, the path is pinned there, and the likelihood is the AR(1) density of the innovation that
+  implies. §11.3's t(mu, sigma_y) "practical response model" was plan 16's first implementation and
+  failed §11.14's gate on D1 (Decision 15). So the PPC is one-step-ahead (`_ppc_coverage_90`).
+- **Three more choices, each with a measured reason (Decision 15).** A trained state samples its
+  pinned `level` and `log_scale` directly; persistence is capped (`persistence_max`); X is split
+  into `beta` (within a state) and `beta_between` (across states). The first two are what let D1's
+  fit pass §11.14's gate; the third keeps a state with no training cell from being predicted off
+  its true level. Undo one and re-run the D1 acceptance before trusting a result.
 - **`fit_state_total_model` returns `StateModelFit`, not a bare `PosteriorDraws`** — a recorded
   deviation from §16.2 (`interfaces.py`'s module docstring). `PosteriorDraws` is imported from
   `reconcile/draws.py`, never redeclared.
@@ -7571,21 +7938,25 @@ about to change before you change it.
   §13.10's gate. The three `include_*` switches are refused at load if set true.
 - X is standardized log establishment count, centred and scaled over training AND prediction cells.
   `qtrly_establishments` is published for suppressed cells, so this reads nothing a suppression
-  withholds.
+  withholds. It enters twice: beta on x - x_bar[s] and beta_between on x_bar[s]
+  (`state_total.state_mean_exposure`), because D1's within-state and between-state slopes differ in
+  sign (Decision 15).
 - One latent AR(1) path per state crosses the 2022-01 NAICS seam: 113310 maps one-to-one across the
   two vintages, each cell keeps its own vintage inside its `cell_id`, and the year effects absorb a
   level shift (`data.py`'s docstring).
 - True zeros are neither trained on nor predicted: they are published, and log(E / A) is undefined
   there. `build_model_data` refuses any training or prediction cell with `A <= 0`, a suppressed cell
   with a value, a non-final training row, and more than one industry or ownership code.
-- Non-centred throughout, with ZeroSumNormal month and year effects and Beta(8, 2) persistence
-  (§11.12's "centered near 0.8"). Every prior is a `config.StateModelPriors` field, so it is in
-  `resolved_dict` and in `run_id`.
+- Non-centred only where no training cell pins a state: a trained state samples its level and its
+  log innovation scale directly (Decision 15). Month and year effects are ZeroSumNormal. Persistence
+  is 0.95 * Beta(8, 2), prior mean 0.76, where §11.12 says "centered near 0.8" (flagged, Decision 7).
+  Every prior is a `config.StateModelPriors` field, so it is in `resolved_dict` and in `run_id`.
 
 ## The gate and its two scopes
 
 `diagnostics.evaluate_gate` measures divergences, parameter R-hat, cell R-hat and bulk and tail
-ESS over the imputed cells' reconciled draws, in-sample 90% predictive coverage, and the two
+ESS over the imputed cells' reconciled draws, one-step-ahead 90% predictive coverage over the
+training cells (they are exact, so an in-sample check would pass by construction), and the two
 reconciliation checks. `production` gates on all of them and `fit-state-model` raises
 `ModelDiagnosticsError` after writing `posterior/diagnostics.json`. `replicate`, the harness's 27
 fits, records everything and gates only on divergences and parameter R-hat (Decision 5);
@@ -7623,7 +7994,8 @@ logging-estimates validate-state-model --config config.yaml  # after validate; 2
 `tests/unit/conftest.py::make_state_fit` builds a `StateModelFit` from a raw-score array with no
 sampler behind it, so reconciliation, the gate, the summary and the store are tested without JAX.
 `tests/integration/test_state_total_recovery.py` simulates from the model's own generative process
-and checks §17.5's recovery rows. Its bounds were first run on arviz-stats 1.3.2 and NumPyro 0.21
+at D1's regime (exact cells, D1's innovation scales, whole-quarter suppression, two untrained
+states) and checks §17.5's recovery rows. Its bounds were first run on arviz-stats 1.3.2 and NumPyro 0.21
 while plan 16 was written, and its docstrings give the arithmetic behind each one.
 ````
 
@@ -7633,7 +8005,7 @@ while plan 16 was written, and its docstrings give the arithmetic behind each on
 
 ````diff
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 8d85cbe..d23ad22 100644
+index 8d85cbe..14b6729 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -6,12 +6,13 @@
@@ -7647,17 +8019,17 @@ index 8d85cbe..d23ad22 100644
 -# which skip without data/, and no test carries `network`: the expression removes nothing that
 -# would have run today. It keeps a future slow or live-endpoint test out of this tier instead.
 +# `-m "not slow and not network"` states the policy the markers declare. Measured at plan 16's
-+# Task 14 without data/ on the author's Mac: the bare run gives 1627 passed, 72 skipped; this one
-+# 1609 passed, 45 skipped, 45 deselected. A runner reports one more skip: one audit test skips
-+# without a personal file outside the repo (D-055). Of the 45 deselected, 27 are data-bound and
-+# would skip here anyway. The other 18 are plan 16's slow state-total model tests, which need no
++# Task 14 without data/ on the author's Mac: the bare run gives 1633 passed, 72 skipped; this one
++# 1612 passed, 45 skipped, 48 deselected. A runner reports one more skip: one audit test skips
++# without a personal file outside the repo (D-055). Of the 48 deselected, 27 are data-bound and
++# would skip here anyway. The other 21 are plan 16's slow state-total model tests, which need no
 +# data/ and WOULD run: the expression keeps their minutes of NUTS sampling out of this tier on
 +# purpose, and they run locally with `pytest -m slow`. No test carries `network`.
  name: CI
  
  on:
 diff --git a/CLAUDE.md b/CLAUDE.md
-index af0104e..b0945bc 100644
+index af0104e..06fe565 100644
 --- a/CLAUDE.md
 +++ b/CLAUDE.md
 @@ -3,8 +3,10 @@
@@ -7719,11 +8091,11 @@ index af0104e..b0945bc 100644
 -`slow` sites are mostly module-level) and passed stays at 1408, so it removes nothing that would
 -have run. Nothing else is deselected. Those counts are THIS MAC's: ubuntu-latest reports 1407
 -passed, 46 skipped, 27 deselected (run 34765933053), because
-+`data/` lives. Since plan 16 the expression DOES remove tests that would have run: the 18 slow
-+model tests (5 in `test_cli_state_model.py`, 6 in `test_cli_validate_state_model.py`, 7 in
++`data/` lives. Since plan 16 the expression DOES remove tests that would have run: the 21 slow
++model tests (5 in `test_cli_state_model.py`, 6 in `test_cli_validate_state_model.py`, 10 in
 +`test_state_total_recovery.py`) need no `data/`, only minutes of NUTS. Collected at plan 16's
-+Task 14 without `data/`: a bare run is 1627 passed, 72 skipped; the hermetic tier 1609 passed, 45
-+skipped, 45 deselected (27 data-bound, 18 slow model tests). Those counts are THIS MAC's: on
++Task 14 without `data/`: a bare run is 1633 passed, 72 skipped; the hermetic tier 1612 passed, 45
++skipped, 48 deselected (27 data-bound, 21 slow model tests). Those counts are THIS MAC's: on
 +ubuntu-latest one more test skips (1407 passed, 46 skipped, 27 deselected before plan 16, run
 +34765933053), because
  `tests/audit/test_qcew_codes.py::test_period_basis_quotes_the_reference_verbatim_where_the_reference_is_readable`
@@ -7759,8 +8131,8 @@ index af0104e..b0945bc 100644
    omitting the key when unset (`runs.py` docstring), so existing runs keep their id.
 +  **Plan 16 re-identified every run once, on purpose**: `model:` stays in the dump because every
 +  key in it changes the draws, and `promotion.catastrophic_stratum_coverage_alpha` was added in the
-+  same commit so the id moved once. The config-only canary moved `39d1d0859838` → `5506f8876841`
-+  and the staged pin `4cf47a918dd8` → `597f02571f3e`.
++  same commit so the id moved once. The config-only canary moved `39d1d0859838` → `14352bb8e56e`
++  and the staged pin `4cf47a918dd8` → `dd7337e89047`.
  - **A run directory can be stale w.r.t. your code.** `run_id` ignores source, so editing an
    estimator and re-running overwrites the same `runs/<id>/`. The one cross-stage check that does
    fire is `constraint_set_hash` (see `constraints/CLAUDE.md`).
@@ -7978,7 +8350,7 @@ Expected: `13`. That is one unit test, plus eight integration modules, with `tes
 uv run pytest -q -p no:cacheprovider
 ```
 
-Expected: Task 0's bare count **+ 129 passed**, 0 failed, skipped unchanged. This is a long run: Task 0's slow D1 tests plus the model's slow tier. Task 10 alone took 391 s when observed. Tasks 9 and 13 add an estimated ten to fifteen minutes, an estimate because their store tests never ran while this plan was written.
+Expected: Task 0's bare count **+ 135 passed**, 0 failed, skipped unchanged. Most of the run is Task 0's slow D1 tests, about 12 minutes. Task 10 took 34 s when observed. Tasks 9 and 13 add their store tests, which never ran while this plan was written. Their fixtures fit at 2 chains of 60 warmup and 60 draws, and the three of their slow tests that did run took 29 s together, so expect minutes, not tens of minutes.
 
 - [ ] **Step 5: Measure the two counts the guides quote, without `data/`**
 
@@ -7991,7 +8363,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow and not network"
 mv data.unlinked data && ls data/staged
 ```
 
-Expected: `1627 passed, 72 skipped` for the bare run, and `1609 passed, 45 skipped, 45 deselected` for the CI expression. Those are the numbers Step 2 wrote into `CLAUDE.md` and `ci.yml`. **If either differs, write the measured numbers into both files, and report the difference in the Task 15 log entry.** Never adjust a test to meet a written count. The arithmetic is the check: skipped stays at 72 and 45, because every test this plan adds runs without `data/`.
+Expected: `1633 passed, 72 skipped` for the bare run, and `1612 passed, 45 skipped, 48 deselected` for the CI expression. Those are the numbers Step 2 wrote into `CLAUDE.md` and `ci.yml`. **If either differs, write the measured numbers into both files, and report the difference in the Task 15 log entry.** Never adjust a test to meet a written count. The arithmetic is the check: skipped stays at 72 and 45, because every test this plan adds runs without `data/`.
 
 - [ ] **Step 6: Gates**
 
@@ -8013,18 +8385,18 @@ git commit -m "docs: the models package, its commands, and the suite counts plan
 ### Task 15: D1: the comparand re-run under the new id, the production fit, and the record
 
 **Implements:**
-- Decision 1's re-run of the §13.10 comparand under `597f02571f3e`, and its byte-for-byte check against `runs/4cf47a918dd8`;
+- Decision 1's re-run of the §13.10 comparand under `dd7337e89047`, and its byte-for-byte check against `runs/4cf47a918dd8`;
 - the production fit on D1 and §11.14's gate on it;
-- the promotion record against the comparand the brief names;
+- `validate-state-model`'s 27 replicate fits, and the promotion record against the comparand the brief names;
 - the stage's findings log.
 
-**Decision 15 predicts this task's outcome, and it is not a pass.** Your human partner's answer to Decision 15's question comes first. If they chose (b), a model-iteration task has been added before this one, and this task runs against the revised model. If they chose (a), this task runs as written, records the failure, and stops. Either way, **every step below that says STOP means stop and report**, with the output that triggered it.
+**Decision 15 measured this task's fit, and it passed there.** On the older local environment the production gate passed on D1 on two seeds, with parameter R-hat 1.0047 and 1.0086 against 1.01. Execution samples on the locked jax and numpyro, so the draws will differ, and the second seed's margin was 0.0014. Both branches of Step 5 stand. The promotion verdict was never measured: it is whatever Step 6 records. **Every step below that says STOP means stop and report**, with the output that triggered it.
 
 **Files:**
 - Modify: `specs/findings/stage-5-log.md` (one dated entry, appended)
 - Modify: `CLAUDE.md` and `src/logging_employment/validate/CLAUDE.md`: the comparand re-run, stated only once it has happened
-- Modify: `src/logging_employment/models/CLAUDE.md`: the measured gate result, as a dated witness
-- Writes, untracked: `runs/597f02571f3e/`. Rewrites `data/constraints/` with bytes Step 4 proves identical.
+- Modify: `src/logging_employment/models/CLAUDE.md`: the measured gate result and verdict, as a dated witness
+- Writes, untracked: `runs/dd7337e89047/`. Rewrites `data/constraints/` with bytes Step 4 proves identical.
 
 **Interfaces:** consumes every command this plan built. Produces nothing later tasks import.
 
@@ -8033,11 +8405,11 @@ git commit -m "docs: the models package, its commands, and the suite counts plan
 ```bash
 git log --oneline -1
 uv run python -c "from pathlib import Path; from logging_employment.config import load_config; from logging_employment.runs import run_id; from logging_employment.cli import _input_digests; c = load_config(Path('config.yaml')); print(run_id(c, {}), run_id(c, _input_digests(c)))"
-test ! -e runs/597f02571f3e && echo "runs/597f02571f3e is free"
+test ! -e runs/dd7337e89047 && echo "runs/dd7337e89047 is free"
 ls runs/4cf47a918dd8
 ```
 
-Expected: Task 14's commit; `5506f8876841 597f02571f3e`; `runs/597f02571f3e is free`; and the comparand's 14 entries, `baseline_results/` among them. **STOP if `runs/597f02571f3e` exists.** Something already wrote under the new id, and a byte comparison against a directory of unknown history proves nothing.
+Expected: Task 14's commit; `14352bb8e56e dd7337e89047`; `runs/dd7337e89047 is free`; and the comparand's 14 entries, `baseline_results/` among them. **STOP if `runs/dd7337e89047` exists.** Something already wrote under the new id, and a byte comparison against a directory of unknown history proves nothing.
 
 - [ ] **Step 2: Keep a copy of the shared constraint tables**
 
@@ -8071,7 +8443,7 @@ from pathlib import Path
 
 import yaml
 
-old, new = Path("runs/4cf47a918dd8"), Path("runs/597f02571f3e")
+old, new = Path("runs/4cf47a918dd8"), Path("runs/dd7337e89047")
 STAMP = {"code_commit", "uv_lock_sha256"}  # beside the id by design (runs.code_provenance)
 
 
@@ -8117,39 +8489,65 @@ Expected: `… identical`, exit 0. Every Parquet file matches by sha256. Every J
 
 - [ ] **Step 5: Fit the production model**
 
-Run it in the background, because it takes about 20 minutes (1,091 s for the fit when measured, plus compile and reconciliation):
-
 ```bash
-uv run logging-estimates fit-state-model --config config.yaml; echo "exit $?"
-cat runs/597f02571f3e/posterior/diagnostics.json
+time uv run logging-estimates fit-state-model --config config.yaml; echo "exit $?"
+cat runs/dd7337e89047/posterior/diagnostics.json
 ```
 
-Expected, per Decision 15: `exit 1`, and `diagnostics.json` shows `"passed": false` with its failures named. **Record the whole file in Step 8 either way.** Then branch:
+Expected, per Decision 15: `exit 0`, and `diagnostics.json` shows `"passed": true`. On the older environment, at the config's seed 3645, the gating checks read 0 divergences, parameter R-hat 1.0047, cell R-hat 1.0042, cell ESS bulk 975 and tail 1,176, and one-step coverage 0.904. The fit took 130 s and reconciliation 38 s. **Record the whole file, and the wall time, in Step 8 either way.** Then branch:
 
-- **The gate failed:** go to Step 6. Nothing else is written, by design (Task 9).
-- **The gate passed**, which Decision 15 did not observe: run `uv run logging-estimates reconcile --config config.yaml`. Expected: exit 0, with `state_model.passed` true in `reconcile_manifest.json`. Then **STOP before Step 6.** At the measured 1,091 s a fit, `validate-state-model`'s 27 replicate fits come to about 8.2 h, past this plan's 8-hour line. Report the fit's time and ask whether to spend them.
+- **The gate passed:** run `uv run logging-estimates reconcile --config config.yaml`. Expected: exit 0, with `state_model.passed` true in `reconcile_manifest.json`. Then apply the timing guard. **If `fit-state-model` took more than 10 minutes, run Step 5a, then STOP before Step 6** and report its time. That is about three times the measured wall time, and Step 6 fits 27 more.
+- **The gate failed, which Decision 15 did not observe: STOP.** Report `diagnostics.json` in full. Nothing else is written, by design (Task 9). A failure here contradicts Decision 15's measurement. Your human partner decides whether to record it, since Step 6 would write `not_beaten` without spending replicate fits (Decision 9), or to investigate the locked versions first.
+
+- [ ] **Step 5a: Count the imputed cells whose interval is a bound**
+
+Decision 15 found 192 imputed cells at the config's seed whose 90% interval had zero width on their §9 upper bound, 177 of them in both seeds it ran. In most of them the raw model overshoots the bound. This step measures the same thing on the executed fit. It gates nothing, and its count goes into Step 8's entry.
+
+```bash
+uv run python - <<'EOF'
+import polars as pl
+
+summary = pl.read_parquet("runs/dd7337e89047/posterior_summary.parquet")
+imputed = summary.filter(pl.col("observed_or_imputed") == "imputed")
+flat = imputed.filter(pl.col("ci90_low") == pl.col("ci90_high"))
+on_upper = flat.filter(pl.col("ci90_high") == pl.col("deterministic_upper"))
+print(f"{imputed.height} imputed, {flat.height} zero-width, {on_upper.height} of them on the upper bound")
+state = pl.col("cell_id").str.split("|").list.get(1).alias("state_fips")
+print(on_upper.group_by(state).len().sort("len", descending=True))
+EOF
+```
+
+Expected: `1227 imputed`, and about 190 zero-width intervals, every one on the upper bound. The older environment gave 192: VT (50) 65, NM (35) 29, NH (33) 22, CO (08) 21, UT (49) 16, and 39 across seven more states. The locked versions' draws can move the count. Whatever it is, record it.
 
 - [ ] **Step 6: Write the promotion record**
 
+Run it in the background. It fits 27 replicates, about 77 minutes at Decision 15's measured speed.
+
 ```bash
-uv run logging-estimates validate-state-model --config config.yaml; echo "exit $?"
-python3 -m json.tool runs/597f02571f3e/promotion_record.json
+time uv run logging-estimates validate-state-model --config config.yaml; echo "exit $?"
+python3 -m json.tool runs/dd7337e89047/promotion_record.json
 ```
 
-Expected after a failed gate: `exit 0`, verdict `not_beaten`, `selected_method` `section_10_8_hierarchy`, `provisional` true, `disclosure_review` `pending_stage_8`, and `gates.coverage.status` `not_evaluated_production_fit_failed`. It runs in seconds, because no replicate is fitted (Decision 9). `comparand` carries `597f02571f3e` and the sha256 of its three validation tables. Those must equal `shasum -a 256 runs/4cf47a918dd8/validation_{scores,metrics,scoreboard}.parquet`, the files Step 4 proved identical.
+Expected: `exit 0`, whichever the verdict.
+- `verdict` is `beat` or `not_beaten`, and `selected_method` is `state_total_model` or `section_10_8_hierarchy` to match.
+- `provisional` is true, and `disclosure_review` is `pending_stage_8`.
+- `gates.convergence.replicates_checked` and `gates.hard_constraints.replicates_checked` are both 27.
+- `comparand` carries `dd7337e89047` and the sha256 of its three validation tables. Those must equal `shasum -a 256 runs/4cf47a918dd8/validation_{scores,metrics,scoreboard}.parquet`, the files Step 4 proved identical.
+
+**The verdict was not measured while this plan was written, and whichever one this records is the result.** Do not re-run with other seeds, settings or regimes to change it. If a replicate's gate failed, `gates.convergence.replicate_failures` names it, and Decision 4 makes the verdict `not_beaten`. **If it has not finished after 4 hours, stop it and STOP**, reporting how far it got. That is about three times the measured estimate.
 
 - [ ] **Step 7: State what is now true in the guides**
 
 `CLAUDE.md`, in the gotcha Task 14 wrote about the re-id, replace:
 
 ```text
-  and the staged pin `4cf47a918dd8` → `597f02571f3e`.
+  and the staged pin `4cf47a918dd8` → `dd7337e89047`.
 ```
 
 with:
 
 ```text
-  and the staged pin `4cf47a918dd8` → `597f02571f3e`. The §13.10 comparand was re-run under the
+  and the staged pin `4cf47a918dd8` → `dd7337e89047`. The §13.10 comparand was re-run under the
   new id and matched `runs/4cf47a918dd8` byte for byte, manifests aside from `code_commit` and
   `uv_lock_sha256` (`specs/findings/stage-5-log.md`).
 ```
@@ -8163,11 +8561,11 @@ with:
 with:
 
 ```text
-  by `runs/4cf47a918dd8`, re-run byte for byte by plan 16 as `runs/597f02571f3e` when the `model:`
+  by `runs/4cf47a918dd8`, re-run byte for byte by plan 16 as `runs/dd7337e89047` when the `model:`
   block re-identified every run) live in the docstrings and in `tests/unit/test_validate_regimes.py`.
 ```
 
-`src/logging_employment/models/CLAUDE.md`: append a bullet to its read-first list that states Step 5's gate result as a dated witness. Include the date, the run id, `passed`, the failed checks with their values, the fit's seconds and `tree_depth_saturation_share`, and a pointer to `specs/findings/stage-5-log.md`.
+`src/logging_employment/models/CLAUDE.md`: append a bullet to its read-first list that states Step 5's gate result and Step 6's verdict as a dated witness. Include the date, the run id, `passed`, each gating check's value, the fit's wall time, `mean_leapfrog_steps` and `tree_depth_saturation_share`, Step 5a's count, the verdict, and a pointer to `specs/findings/stage-5-log.md`.
 
 - [ ] **Step 8: Append the stage log entry**
 
@@ -8175,10 +8573,11 @@ Append one entry to `specs/findings/stage-5-log.md`, in its own format (`## YYYY
 - the base commit;
 - Task 14's measured counts, and any difference from those written;
 - Step 4's result;
-- Step 5's `diagnostics.json` in full, with the fit's seconds and the `sampler` block;
-- Step 6's verdict;
+- Step 5's `diagnostics.json` in full, with the command's wall time and the `sampler` block;
+- Step 5a's count, by state;
+- Step 6's verdict, each gate's `passed`, and the command's wall time;
 - Task 12 Step 4's tripwire output, the evidence `D-109`'s done-when asks for;
-- a sentence that Decision 15's question, and `D-116`'s and `D-115`'s dispositions (Decision 1), are open for the Plan Completion Protocol.
+- a sentence saying what stays open for the Plan Completion Protocol: Decision 7's four flagged readings, Decision 15's open points (the cells whose interval is a bound, and the unstable means in NV and RI), and `D-116`'s and `D-115`'s dispositions (Decision 1).
 
 - [ ] **Step 9: Gates and commit**
 
@@ -8192,11 +8591,12 @@ git commit -m "docs(findings): plan 16's D1 run: the comparand re-run byte for b
 
 Report:
 - Step 4's line;
-- the gate report;
-- the verdict;
+- the gate report and the fit's wall time;
+- Step 5a's count;
+- the verdict, and which gates decided it;
 - whether §19 Phase 3's "diagnostics pass" holds.
 
-The Plan Completion Protocol comes next. Ticking Stage 5 in the roadmap, filing Decision 15's design item under answer (a), and ticking `D-109` all belong to it, not to this task.
+The Plan Completion Protocol comes next. Ticking Stage 5 in the roadmap, filing Decision 7's flagged readings and Decision 15's open points as deferred items, and ticking `D-109` all belong to it, not to this task.
 
 ---
 
@@ -8207,12 +8607,12 @@ Every item on the brief's `Spec:`, `Gap closed:` and `Exit:` lines, and where th
 | Brief item | Where | Note |
 |---|---|---|
 | §11 intro: "separable interfaces" | Task 3 (`models/interfaces.py`) | Decision 8: `StateModelFit` carries the `PosteriorDraws` §16.2 names |
-| §11.1 mean, §11.2 Student-t AR(1) | Task 4 | H omitted until Stage 7 (Decision 7) |
-| §11.3 likelihood on disclosed training cells; "Suppressed cells have no pseudo-observation" | Tasks 3–4 | The likelihood site is shaped by training cells alone. Decision 15 opens the section's first sentence |
+| §11.1 mean, §11.2 Student-t AR(1) | Task 4 | H omitted until Stage 7 (Decision 7). X split into within-state and between-state parts, **flagged** (Decision 7, reading 4) |
+| §11.3 likelihood on disclosed training cells; "Suppressed cells have no pseudo-observation" | Tasks 3–4 | Training cells are exact: the likelihood is the AR(1) density of the innovations they pin, over training cells alone. The "practical response model" is dropped, **flagged** (Decision 7, reading 1) |
 | §11.5 score | Task 4, `raw_scores` | Literal, q = A·exp(μ) (Decision 6) |
 | §11.11's QCEW rows | Task 3 | Disclosed final: trained on. Non-final training row: refused. Suppressed: predicted only |
-| §11.12 priors | Tasks 2 and 4 | Every prior in config; Beta(8, 2) and df 5 as §11.12 states |
-| §11.14 | Task 4 (non-centred, vectorized); Task 8 (the gate in code) | Two scopes (Decision 5). **Measured failing on D1** (Decision 15) |
+| §11.12 priors | Tasks 2 and 4 | Every prior in config; df 5 as §11.12 states. Persistence 0.95 · Beta(8, 2), prior mean 0.76, **flagged** (Decision 7, reading 2) |
+| §11.14 | Task 4 (vectorized; non-centred where no training cell pins a state); Task 8 (the gate in code) | Two scopes and a one-step predictive check (Decision 5). Trained states set the non-centred SHOULD aside, **flagged** (Decision 7, reading 3). §11's model as written failed the gate on D1, and the revised model passed it on two seeds (Decision 15) |
 | §12.7 | Tasks 5, 6, 11 | Summaries and harness estimates from reconciled joint draws only |
 | §13.10, applied | Tasks 11–13 | Readings flagged in Decision 4 |
 | §15.4 | Task 7 | No size index until Stage 6 |
@@ -8221,7 +8621,7 @@ Every item on the brief's `Spec:`, `Gap closed:` and `Exit:` lines, and where th
 | §17.4 rows 5–6 | Task 10 (row 5); Tasks 5 and 9 (row 6) | |
 | §17.5 state-total rows | Task 10 | The other four rows are later stages' |
 | §19 Phase 3 deliverables | Tasks 4, 5, 11–13 | |
-| §19 Phase 3 acceptance: "diagnostics pass" | Task 15 | **Not met on D1 as measured** (Decision 15) |
+| §19 Phase 3 acceptance: "diagnostics pass" | Task 15 | Met on D1 as measured on the older environment, two seeds (Decision 15). Task 15 measures it on the locked versions |
 | §19 Phase 3 acceptance: "constraints pass on every draw"; "baselines are beaten or the simpler model is retained" | Tasks 5, 9; Tasks 12–13, 15 | |
 | §21 PPL row | Task 1, Decision 10 | NumPyro, with a CmdStanPy slot (`BACKENDS`). §21's benchmark "before final selection" is not run: no CmdStanPy is installed |
 | Appendix A `model:` block | Task 2 | Into `resolved_dict`, one re-id (Decision 1) |
@@ -8232,8 +8632,8 @@ Every item on the brief's `Spec:`, `Gap closed:` and `Exit:` lines, and where th
 | REQ-024 (gate applied), INV-014 (applied) | Tasks 11–13 | Same harness, same masks, same metrics as the comparand |
 | REQ-029 (model diagnostics) | Tasks 8–9 | `ModelDiagnosticsError`; `fit-state-model` exits 1 and keeps its report |
 | INV-006 (measurement models) | Tasks 4–6 | Modeled values never become equations. Every draw is reconciled into §9's bounds and the declared anchor, and nothing the model writes feeds `build-constraints`. Published QCEW enters the likelihood. CBP, TPO, FIA and CES measurement models belong to later stages |
-| Exit: §17.5 recovery within stated tolerances | Task 10 | On a simulated panel; it does not transfer to D1 (Decision 15) |
-| Exit: every retained draw satisfies all hard constraints, after transformation | Tasks 5, 9 | Measured on D1 in Decision 15's probe: drift 4.5e-13, 0 violations |
+| Exit: §17.5 recovery within stated tolerances | Task 10 | On a panel simulated at D1's regime (Decision 15). Recovery at D1's own mask also passed during the design pass |
+| Exit: every retained draw satisfies all hard constraints, after transformation | Tasks 5, 9 | Measured on D1 in Decision 15's fits: drift 4.5e-13, 0 violations, on both seeds |
 | Exit: §11.14 gate enforced in code, not documented | Tasks 8–9 | |
 | Exit: suppressed cells receive no pseudo-observation | Tasks 3–4 | |
 | Exit: the record states beat or not-beaten, and the simpler method is selected when not beaten | Tasks 12, 13, 15 | |
