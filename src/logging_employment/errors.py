@@ -182,3 +182,14 @@ class ConstraintDataError(LoggingEmploymentError):
     emitted would describe a system that is wrong about the data. Distinct from
     `BoundViolationError`, which is an ESTIMATE outside its interval; this is the TRUTH outside it.
     """
+
+
+class ModelDiagnosticsError(LoggingEmploymentError):
+    """A production fit failed §11.14's diagnostic gate, so its draws may not be released.
+
+    Raised by `models/diagnostics.py::assert_gate_passes` AFTER `posterior/diagnostics.json` is
+    written, so the evidence of the failure survives the refusal. §11.14 lists what "Promotion
+    requires", and the roadmap's Stage 5 exit asks that the gate be "enforced in code, not
+    documented". This is the enforcement. Replicate fits inside §13's harness record their gate and
+    do not raise; §13.10's convergence gate reads those reports instead.
+    """
