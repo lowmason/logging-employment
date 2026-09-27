@@ -2095,7 +2095,7 @@ the event that makes it reachable rather than a date.
 
 ## 14-stage5-gate-inputs — 2026-09-11
 
-- [ ] `D-109` **`PromotionConfig`'s three keys are recorded inert rather than read.** R-S5G-3 ruled
+- [x] `D-109` **`PromotionConfig`'s three keys are recorded inert rather than read.** R-S5G-3 ruled
       2026-09-11 that no §13.10 evaluator is built before Stage 5 exists: `minimum_wape_improvement`
       needs a second `validation_scoreboard.parquet` and there is one,
       and `maximum_major_stratum_wape_degradation` / `nominal_coverage_tolerance` have their input as of R-S5G-1 (the coverage VALUES carried `D-112`'s
@@ -2108,6 +2108,15 @@ the event that makes it reachable rather than a date.
       `tests/unit/test_config_validation_block.py::test_the_promotion_keys_are_still_unread_and_the_docstring_still_says_so`
       reddens on that day and names the keys that moved — AND the coverage gate compares exactly, pinned by
       a test in which a coverage of exactly 17/20 against nominal 0.90 and tolerance 0.05 counts as within.
+      → done in plan 16 (2026-09-27): `38dc40b` builds §13.10's promotion record in
+      `validate/promotion.py`, which reads all three keys plus plan 16's fourth,
+      `catastrophic_stratum_coverage_alpha`, and is the only module that does. Before its conversion
+      the tripwire reddened naming all four ("now read by {'validate/promotion.py': [...]}"), and it
+      became `tests/unit/test_config_validation_block.py::test_the_promotion_keys_are_read_only_by_the_promotion_record`,
+      which pins that module as the sole reader. Coverage is compared exactly, hits over
+      `calibration_sample_size` as a `Fraction` against `Fraction(repr(tolerance))`, pinned by
+      `tests/unit/test_validate_promotion.py::test_seventeen_of_twenty_is_within_five_points_of_ninety`.
+      The record's first D1 run is `runs/dd7337e89047/promotion_record.json`.
 
 - [x] `D-110` **No MEASURED §9.3 margin gives `exact_reconstruction_flag` a live instance -- but one
       named path was not measured.** R-S5G-5 measured `113`, `1133`, `11331` and total ownership at
@@ -2272,6 +2281,9 @@ review and from fixing it.
       which is why plan 15 did not need the path.
       Size: plan. Revisit if: a QCEW revision publishes both siblings over a suppressed child, or Stage 5's
       §13.10 comparison needs tighter state bounds than the parent alone gives.
+      Plan 16 ran that comparison without it on 2026-09-27 (its Decision 1): the model and the
+      comparand are scored on one identification set, so a tighter bound would move both, and the
+      second arm did not fire. The first arm still watches.
 - [ ] `D-116` **§13.2 step 1's "parent share" predictor is still declined, though its input is now staged.**
       `validate/propensity.py`'s module docstring records it as left out by decision. The private `113`
       state series it divides by is `qcew_state_parent` since plan 15, and an ESTABLISHMENT-count share
@@ -2285,6 +2297,9 @@ review and from fixing it.
       That condition fired on 2026-09-26, when `D-113` re-ran the comparand, and this was left out on
       purpose: a new predictor re-draws every regime's mask, so bundling it would have left the
       scoreboard's movement unattributable between the two changes. It now costs a re-run of its own.
+      It fired again on 2026-09-27, when plan 16 re-ran the comparand as `runs/dd7337e89047` because
+      the `model:` block re-identified every run, and it was declined for the same reason (plan 16,
+      Decision 1): that re-run had to reproduce `runs/4cf47a918dd8` byte for byte, and it did.
 - [ ] `D-117` **A parent-margin row fuses two sources, and nothing compares their release or publication vintage.**
       `constraints/rows.py::parent_margin_rows` couples a suppressed `qcew_monthly` state cell with its
       `qcew_state_parent` parent, and `constraints/compat.py::assert_parent_margin_compatible` checks
@@ -2562,3 +2577,90 @@ solver instead.
       `kError` and `kWarning`; a stub refuses each option `configured_highs` sets, in turn, so an
       option set without its answer read fails. The suite without `data/` went from 1498 to 1503
       passed, 72 skipped.
+
+## 16-stage5-logging-employment-spec — 2026-09-27
+
+Raised during plan 16's execution and its D1 run, `runs/dd7337e89047`. All sixteen tasks shipped
+and no step was skipped. Stage 5's promotion record is `not_beaten`, so `section_10_8_hierarchy`
+stays selected until Stage 7 re-runs §13.10. `D-127` to `D-130` are open points the plan named for
+this protocol, and `D-131` and `D-132` come from the promotion record. The measurements are in the
+2026-09-27 entry of `specs/findings/stage-5-log.md`.
+
+- [ ] `D-127` **The shipped state-total model reads four of §11's sentences differently from their
+      text, and the spec still says the other thing.** Plan 16's Decision 7 flags each, a D1
+      measurement in its Decision 15 design pass forced each, and `src/logging_employment/models/CLAUDE.md`
+      ("The model's structural choices") records them. (1) §11.3: training cells are exact observations
+      that pin the latent path, and the "practical response model" y ~ t(μ, σ_y) is dropped. On D1 it
+      failed §11.14's gate with σ_y near 0.004, and re-parameterizing did not rescue it (R-hat 2.89).
+      (2) §11.12: persistence is `persistence_max` · Beta(8, 2) with `persistence_max` 0.95, so its prior
+      mean is 0.76 where §11.12 says "centered near 0.8". Uncapped, a production-length fit failed R-hat
+      on one of two seeds. (3) §11.14: its non-centred SHOULD is set aside for states with a training
+      cell, which sample their level and log innovation scale directly, a shear with Jacobian 1.
+      Non-centred, every tree hit the 1,023-step ceiling and a fit took 1,091 s against about 130.
+      (4) §11.1: X is two predictors built from one count, the within-state part x − x̄_s and the
+      between-state part x̄_s. With one slope, a D1-regime simulation's untrained states had hidden-cell
+      90% coverage 0.50. The four were measured as one model, so reversing any one means re-running the
+      D1 production gate and `tests/integration/test_state_total_recovery.py`, and every change to
+      `model:` re-identifies every run.
+      Size: design. Done when: each reading is either written into §11 as an amendment or reversed by a
+      ruling, and a reversed one ships with a D1 fit that passes §11.14's production gate.
+- [ ] `D-128` **189 imputed cells have a zero-width posterior interval on their §9 upper bound, and no
+      check reads it.** In `runs/dd7337e89047/posterior_summary.parquet`, 189 of the 1,227 imputed cells
+      have `ci90_low == ci90_high == deterministic_upper`: VT (50) 67, NM (35) 28, NH (33) 22, CO (08) 20,
+      UT (49) 14, WV (54) 12, WI (55) 12, KY (21) 5, IA (19) 4, CT (09) 2, WY (56) 2, SD (46) 1. On a
+      state cell that bound is the `parent_margin` row's published private `113` value (plan 15). Plan
+      16's Decision 15 traced the pattern on an earlier fit: in 159 of 192 such cells more than half the
+      raw draws already exceeded the bound, which the model never reads, so it overshoots; elsewhere
+      (WV, IA) the draws sat below it and §12.3's scaling toward the month's residual lifted them onto
+      it. Either way the summary states a `113310` cell equal to its parent with no uncertainty.
+      §11.14's gate checks neither, and Stage 5 left open whether the model adds anything where §9 binds.
+      Size: design. Done when: a ruling states how a cell whose posterior interval collapses onto a §9
+      bound is scored (§13) and released (Stage 8), and a test pins that treatment on a constructed cell.
+- [ ] `D-129` **In the sparsest states the reconciled posterior mean moves with the seed far more than
+      the median, and the harness scores the mean.** Plan 16's Decision 15 fitted D1 on two seeds on the
+      older environment (jax 0.11.1, numpyro 0.21.0). Reconciled medians agreed within 3.7% in every
+      cell, but means differed by up to 12.2%, in NV (32) and RI (44). The harness's point estimate is
+      the mean of the reconciled draws (Decision 11, `models/reconciliation.py::exact_column_means`),
+      because a mean keeps the month's adding-up and each cell's bounds and a median does not. So those
+      states' WAPE in `validate-state-model` carries that seed noise. Task 15 ran one production seed on
+      the locked versions, so the spread there is unmeasured.
+      Size: plan. Done when: two production seeds on the locked versions measure every imputed cell's
+      mean spread, and either a draw count that brings NV's and RI's within the medians' is set in
+      `config.yaml` or a ruling accepts the spread, before Stage 7's §13.10 re-run scores means again.
+- [ ] `D-130` **`run-baselines` reads `deterministic_bounds.parquet` without checking which constraint
+      set it was solved against.** `run_id` does not cover code, so `build-constraints` can re-run under
+      the same id and leave the previous bounds beside a new `schema_manifest.json`. Plan 16 made
+      `cli.py::fit_state_model_command` refuse that, comparing the bounds' `constraint_set_hash` column
+      with the manifest's before it deletes anything, and `reconcile` and `validate-state-model` refuse
+      a stale fit (`cli.py::_stale_fit`). `cli.py::run_baselines_command` compares nothing: it checks
+      every estimate against the old bounds and stamps `baseline_results` with the manifest's new hash.
+      Plan 16 left Stage 4's command alone and flagged the gap (Decision 9).
+      Size: quick-fix. Done when: `run_baselines_command` refuses, before it writes, bounds whose
+      `constraint_set_hash` is not the manifest's, as `fit_state_model_command` does, and a test re-runs
+      `build-constraints` on a changed system under the same id and sees `run-baselines` refuse.
+- [ ] `D-131` **The state-total model's 90% intervals under-cover hidden cells, so §13.10's coverage
+      gate failed.** `runs/dd7337e89047/promotion_record.json` (plan 16, 2026-09-27), pooled over the
+      nine scored regimes: 940 of 1,253, 0.750, against 0.90 ± 0.05. The binomial tail test at α = 0.001
+      found it catastrophic in 7 of the 9 regimes and 6 of the 9 divisions; only
+      `clustered_states_within_month` was within tolerance, 55 of 60. With the improvement and
+      convergence gates it made the verdict `not_beaten`, so `section_10_8_hierarchy` stays selected,
+      provisionally, until Stage 7 re-runs §13.10 with the harvest factor and §11.13's variants. One
+      question is recorded, not answered: how many of the 313 misses are intervals of zero width on a §9
+      bound (`D-128`'s pattern, in each mask's own bounds)? The replicate scores are in
+      `runs/dd7337e89047/state_model_validation/`.
+      Size: design. Done when: Stage 7's promotion record re-states the coverage gate over the same nine
+      regimes, and the Stage 5 misses are attributed, the share whose interval collapsed onto a bound
+      measured.
+- [ ] `D-132` **The model passes §11.14 with thin margins on the locked versions, and one of 27 replicate
+      fits failed it.** The production fit on `runs/dd7337e89047` passed with parameter R-hat 1.0067
+      against 1.01 and cell tail ESS 434 against 400, where plan 16's Decision 15 had measured 1.0047
+      and 1,176 on the older environment (jax 0.11.1, numpyro 0.21.0; the lock holds 0.11.2 and 0.22.0).
+      In `validate-state-model`, `whole_seasonal_blocks` seed 2048 failed the replicate gate on
+      parameter R-hat, 1.0187, which alone makes §13.10's verdict `not_beaten` (plan 16, Decision 4).
+      The other 26 ran from 1.0037 to 1.0079, all 27 with 0 divergences. Read at production scope, for
+      information only, replicate cell R-hat reached 1.0167 and cell tail ESS fell to 228. Sampling is
+      set by `model.chains`, `model.warmup`, `model.draws` and `model.target_accept` in `config.yaml`
+      (4, 1,000, 1,000, 0.9), and changing any of them re-identifies every run.
+      Size: plan. Done when: a sampler setting measured on two seeds clears the production gate by a
+      stated margin and passes all 27 replicate fits, and it is set in `config.yaml` before Stage 7's
+      §13.10 re-run.
