@@ -51,6 +51,7 @@ from ..errors import (
 )
 from ..reconcile.allocate import allocate
 from ..reconcile.anchor import (
+    Partition,
     assert_universe_closes,
     closure_audit,
     national_residual,
@@ -172,8 +173,11 @@ def resolve_estimators(declared: Sequence[str] | None) -> tuple[Estimator, ...]:
     return tuple(e for e in REGISTRY if e.estimator_id in chosen)
 
 
-def _cell_ids(partition, anchor) -> dict[str, str]:
+def missing_cell_ids(partition: Partition) -> dict[str, str]:
     """The shipped seven-field `cell_id` for each missing cell, keyed by state.
+
+    Public since plan 16: `models/reconciliation.py` keys a fit's draws by the same identifier, and
+    a second copy of this function would be a second place for the seven fields to drift.
 
     `anchor.missing_cells` carries bare `state_fips`, but Stage 2's identifier is
     `kind|state|month|ownership|industry|naics_vintage|size_class`. Building a shorter string here
@@ -415,7 +419,7 @@ def run_baselines(
         anchor = national_residual(data.qcew_monthly, partitions[month], reference_month=month)
         if not anchor.missing_cells:
             continue
-        ids = _cell_ids(partitions[month], anchor)
+        ids = missing_cell_ids(partitions[month])
         for estimator in estimators:
             try:
                 outcome = estimator.weights(context, anchor)
