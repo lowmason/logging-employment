@@ -49,9 +49,9 @@ pytest; new here: JAX, NumPyro, arviz-base, arviz-stats (with xarray) and h5netc
 
 **Suite counts are stated as deltas, and every delta was measured.**
 - Base, with `data/`: `1570 passed` for the whole suite (12 min) and `1543 passed, 27 deselected` for the non-slow tier (2.5 min), at `40b2688`, measured while this plan was written.
-- Tests added: 135, of which 21 are `slow`, and every one runs without `data/`.
-- Per-task deltas on the non-slow suite: Task 1 +6, Task 2 +14, Task 3 +14, Task 4 +13, Task 5 +8, Task 6 +9, Task 7 +4, Task 8 +12, Task 9 +3, Task 10 +0 (10 slow), Task 11 +14, Task 12 +17, Task 13 +0 (6 slow).
-- The scratch's hermetic count after Task 13 was `1607 passed, 45 skipped, 49 deselected`. With the five h5netcdf tests below, that becomes the `1612 passed, 45 skipped, 48 deselected` Task 14 expects.
+- Tests added: 138, of which 21 are `slow`, and every one runs without `data/`.
+- Per-task deltas on the non-slow suite: Task 1 +6, Task 2 +16, Task 3 +14, Task 4 +13, Task 5 +8, Task 6 +9, Task 7 +4, Task 8 +12, Task 9 +4, Task 10 +0 (10 slow), Task 11 +14, Task 12 +17, Task 13 +0 (6 slow).
+- The scratch's hermetic count after Task 13 was `1610 passed, 45 skipped, 49 deselected`. With the five h5netcdf tests below, that becomes the `1615 passed, 45 skipped, 48 deselected` Task 14 expects.
 
 **What was NOT executed, and why:**
 
@@ -63,8 +63,8 @@ pytest; new here: JAX, NumPyro, arviz-base, arviz-stats (with xarray) and h5netc
   - the four Task 13 tests on the `validated` fixture.
 
   Everything they call below the netCDF layer ran.
-- **Every `requires_staged` test at Tasks 1–14.** The per-task gates ran without `data/`, so these were collected and skipped. The non-slow ones then ran once at Task 14's code with `data/` linked: `1652 passed, 49 deselected`, which is 1543 + 114 less the five h5netcdf tests, the moved pin included. The slow D1 tier was not re-run on plan code; Task 15 Step 4's byte comparison is its check.
-- **Task 14's two measured counts,** predicted from the scratch's: a bare run at Task 14's code without `data/`, leaving out the 13 tests that need h5netcdf, gave `1620 passed, 72 skipped`, and those 13 make it the `1633 passed, 72 skipped` Task 14 expects. The hermetic count is the one above.
+- **Every `requires_staged` test at Tasks 1–14.** The per-task gates ran without `data/`, so these were collected and skipped. The non-slow ones then ran once at Task 14's code with `data/` linked: `1655 passed, 49 deselected`, which is 1543 + 117 less the five h5netcdf tests, the moved pin included. The slow D1 tier was not re-run on plan code; Task 15 Step 4's byte comparison is its check.
+- **Task 14's two measured counts,** predicted from the scratch's: a bare run at Task 14's code without `data/`, leaving out the 13 tests that need h5netcdf, gave `1623 passed, 72 skipped`, and those 13 make it the `1636 passed, 72 skipped` Task 14 expects. The hermetic count is the one above.
 - **Task 15, apart from three pieces.** Its production fit, reconciliation and gate ran on D1 through the scratch code on two seeds, and passed (Decision 15). Seven replicate masks ran through the same fit, reconcile and gate code, outside the CLI. Step 4's byte comparison was dry-run against a doctored copy of the comparand: it accepted exactly the declared differences and named two planted ones. The comparand re-run itself, the CLI's 27 replicate fits, and every fit on the locked versions happen first at execution.
 
 ---
@@ -121,6 +121,7 @@ The brief leaves these open, or flags them for an explicit decision. Each gives 
      - persistence `persistence_max` · Beta(8, 2) = 0.95 · Beta(8, 2), prior mean 0.76 (reading 2 below);
      - innovation scale HalfNormal(0.1) with a log-scale dispersion HalfNormal(0.5);
      - the innovations' Student-t degrees of freedom fixed at 5 (§11.12). There is no observation scale (reading 1).
+     - Every scale and concentration must be positive and finite, the intercept's mean finite, and the degrees of freedom above 2, because eta's first month starts at a variance-matched scale. Each is refused at load, by name (§18.3).
    - The parameterization: a state with a training cell samples its level and its log innovation scale directly, and a state without one is non-centred (reading 3). Month and year effects are ZeroSumNormal, and eta starts at a variance-matched stationary scale.
    - Float64 is enabled at import, chains run `vectorized`, and the seed is `sum(map(ord, "logging-employment/state-total-model"))` = 3645.
 
@@ -133,7 +134,7 @@ The brief leaves these open, or flags them for an explicit decision. Each gives 
 8. **`fit_state_total_model` returns `StateModelFit`, not a bare `PosteriorDraws`**, a deviation from §16.2 recorded in `models/interfaces.py`. §11.14 says the interface "MUST return joint draws and standard diagnostics", and `PosteriorDraws` has no slot for a divergence count or a parameter trace. `StateModelFit.raw_scores` is the `PosteriorDraws` §16.2 names, imported from `reconcile/draws.py` and never redeclared.
 
 9. **Commands.**
-   - `fit-state-model` is §16.1's, with preconditions `schema_manifest.json` and `deterministic_bounds.parquet`. A re-fit deletes the previous fit's artifacts first. `posterior/diagnostics.json` is written BEFORE the gate is enforced, so a failure exits 1 and keeps its evidence.
+   - `fit-state-model` is §16.1's, with preconditions `schema_manifest.json` and `deterministic_bounds.parquet`, and a third: the bounds' `constraint_set_hash` must be the manifest's. `run_id` does not cover code, so `build-constraints` can re-run under the same id and leave stale bounds beside a new manifest. `constraint_set_hash` is the check the repo keeps for exactly that (CLAUDE.md), and it runs before a re-fit deletes the previous fit's artifacts. `run-baselines` on `main` reads the bounds without that comparison. **Flagged for review:** this plan leaves Stage 4's command alone and records the gap for the Plan Completion Protocol to file, unless review moves the same check into Task 9. `posterior/diagnostics.json` is written BEFORE the gate is enforced, so a failure exits 1 and keeps its evidence.
    - `reconcile` gains a second job. When a store exists, it re-reads it and re-checks INV-012 plus the draws' digest, recorded under `state_model` in `reconcile_manifest.json`. The key is omitted, never null, when there is no store, so a baseline-only run writes exactly the keys it always wrote.
    - `validate-state-model` is NOT in §16.1. It is added so that `validate` stays the comparand's command and its output stays byte-identical to Stage 4's. It needs `validate`'s three tables and `posterior/diagnostics.json`, and writes `state_model_validation/` plus `promotion_record.json`. Either verdict exits 0, because "deploy the simpler method" is an outcome, not an error. A failed production fit gets a `not_beaten` record without the 27 replicate fits being spent.
 
@@ -572,7 +573,7 @@ Both config additions land in this one task because both feed `resolved_dict`. S
 **Interfaces:**
 - Consumes: nothing from this plan.
 - Produces:
-  - `config.StateModelPriors`: 12 floats, as Decision 7 lists them. There is no observation scale (Decision 15), and `persistence_max` caps ρ;
+  - `config.StateModelPriors`: 12 floats, as Decision 7 lists them. There is no observation scale (Decision 15), and `persistence_max` caps ρ. Every scale and concentration is `PositiveFinite` (positive and finite), the intercept's mean is finite, and `innovation_df` exceeds 2, each refused at load by name (§18.3);
   - `config.StateModelDiagnostics`: `max_rhat: float = 1.01`, `min_ess_per_chain: int = 100`, `max_divergences: int = 0`, `min_ppc_coverage_90: float = 0.85`;
   - `config.ModelConfig`:
     - `backend: Literal["numpyro"]`;
@@ -586,13 +587,14 @@ Both config additions land in this one task because both feed `resolved_dict`. S
 
 - [ ] **Step 1: Write the failing tests**
 
-`tests/unit/test_config_model_block.py` (new; 13 tests):
+`tests/unit/test_config_model_block.py` (new; 15 tests):
 
 ```python
 """Appendix A's `model:` block (§11) as `ModelConfig`: what it pins, accepts and refuses."""
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -648,6 +650,42 @@ def test_the_fitted_model_alone_is_a_valid_multiplier_list() -> None:
 def test_one_chain_is_refused_because_rhat_needs_two() -> None:
     with pytest.raises(ValidationError, match="chains"):
         ModelConfig.model_validate({"chains": 1})
+
+
+# The priors that are not scales or concentrations, each with its own range below.
+BOUNDED_PRIORS = {"intercept_mean", "persistence_max", "innovation_df"}
+
+
+def test_every_prior_scale_and_concentration_must_be_positive_and_finite() -> None:
+    """A non-positive or non-finite scale would reach NumPyro as an invalid distribution and fail
+    as a backend error or a non-finite density, not as a refusal naming the value (§18.3). Read off
+    the model, not listed, so a prior added later is covered until someone decides otherwise."""
+    scales = sorted(set(StateModelPriors.model_fields) - BOUNDED_PRIORS)
+    assert len(scales) == 9
+    for name in scales:
+        for value in (0.0, -1.0, math.inf, math.nan):
+            with pytest.raises(ValidationError, match=name):
+                StateModelPriors.model_validate({name: value})
+
+
+def test_the_bounded_priors_refuse_values_outside_their_ranges() -> None:
+    """The intercept's mean may be any finite number. The cap is a share of 1, so 1.0 removes it.
+    The degrees of freedom must leave the innovations a variance, because eta's first month starts
+    at the variance-matched scale sigma / sqrt(1 - rho^2)."""
+    for name, value in (
+        ("intercept_mean", math.inf),
+        ("intercept_mean", math.nan),
+        ("persistence_max", 0.0),
+        ("persistence_max", 1.01),
+        ("innovation_df", 2.0),
+        ("innovation_df", math.inf),
+    ):
+        with pytest.raises(ValidationError, match=name):
+            StateModelPriors.model_validate({name: value})
+    accepted = StateModelPriors.model_validate(
+        {"intercept_mean": -0.5, "persistence_max": 1.0, "innovation_df": 2.5}
+    )
+    assert (accepted.intercept_mean, accepted.persistence_max) == (-0.5, 1.0)
 
 
 def test_a_misspelled_model_key_is_refused() -> None:
@@ -881,9 +919,18 @@ ERROR tests/unit/test_config.py
 
 ```diff
 diff --git a/src/logging_employment/config.py b/src/logging_employment/config.py
-index 8dcd9b0..f4706b6 100644
+index 8dcd9b0..2c2d5d3 100644
 --- a/src/logging_employment/config.py
 +++ b/src/logging_employment/config.py
+@@ -5,7 +5,7 @@ from __future__ import annotations
+ import os
+ import re
+ from pathlib import Path
+-from typing import Literal
++from typing import Annotated, Literal
+ 
+ import yaml
+ from dotenv import dotenv_values
 @@ -109,9 +109,9 @@ class SourcesConfig(_Strict):
      `nonemployer`, `bea` -- carry `enabled: false` and belong to Stages 4-8; before they were
      declared here, `extra="forbid"` made the spec's own reference configuration unloadable, which
@@ -924,12 +971,18 @@ index 8dcd9b0..f4706b6 100644
  
      NO EVALUATOR IS BUILT HERE, deliberately. A function whose primary argument is Stage 5's
      not-yet-designed output would fix that signature by guessing it, and three of §13.10's six
-@@ -319,6 +323,118 @@ class PromotionConfig(_Strict):
+@@ -319,6 +323,130 @@ class PromotionConfig(_Strict):
      minimum_wape_improvement: float = 0.05
      maximum_major_stratum_wape_degradation: float = 0.02
      nominal_coverage_tolerance: float = 0.05
 +    # Originated by plan 16. §13.10 says "does not fail catastrophically" and gives no number.
 +    catastrophic_stratum_coverage_alpha: float = 0.001
++
++
++# A prior's scale or concentration. NumPyro would take a non-positive or non-finite one without
++# complaint and fail later as a backend error or a non-finite density, not as a refusal naming the
++# value (§18.3), so it is refused here, at load.
++PositiveFinite = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
 +
 +
 +class StateModelPriors(_Strict):
@@ -939,30 +992,36 @@ index 8dcd9b0..f4706b6 100644
 +    and so in `runs.run_id`, deliberately: a prior changes every draw the model writes. The values
 +    are weakly informative on the log employees-per-establishment scale, where D1's observed cells
 +    have mean 1.46 and SD 0.48 (measured 2026-09-26), so `intercept_mean` centres the intercept
-+    there. Both Student-t degrees of freedom are fixed at 5, §11.12's "fixed near 5 for the first
-+    implementation".
++    there. The innovations' Student-t degrees of freedom are fixed at 5, §11.12's "fixed near 5 for
++    the first implementation".
++
++    EVERY PRIOR IS CHECKED AT LOAD. Scales and concentrations are positive and finite
++    (`PositiveFinite`), the intercept's mean is finite, and the degrees of freedom exceed 2: eta's
++    first month starts at the variance-matched scale sigma / sqrt(1 - rho^2), which needs the
++    innovations to have a variance.
 +
 +    PERSISTENCE IS `persistence_max * Beta(8, 2)`: capped at 0.95, mean 0.76, §11.12's "transformed
 +    Beta prior centered near 0.8". §11.2 prefers the AR(1) because Logging intensity is "plausibly
-+    mean-reverting". Uncapped, D1's persistence reached 0.978 and a production fit failed §11.14's
-+    R-hat on one of two seeds; capped, both passed (plan 16, Decision 15). 1.0 removes the cap.
++    mean-reverting". Uncapped, the largest state's posterior-mean persistence on D1 was 0.978, and
++    a production fit failed §11.14's R-hat on one of two seeds; capped, both passed (plan 16,
++    Decision 15). 1.0 removes the cap.
 +
 +    THERE IS NO OBSERVATION SCALE. Training cells are exact (§11.3), so §11.3's `sigma_y` and its
 +    degrees of freedom are not parameters of the model.
 +    """
 +
-+    intercept_mean: float = 1.5
-+    intercept_sd: float = 1.0
-+    state_scale_sd: float = 0.5
-+    region_scale_sd: float = 0.5
-+    month_scale_sd: float = 0.25
-+    year_scale_sd: float = 0.25
-+    persistence_concentration1: float = 8.0
-+    persistence_concentration0: float = 2.0
++    intercept_mean: float = Field(default=1.5, allow_inf_nan=False)
++    intercept_sd: PositiveFinite = 1.0
++    state_scale_sd: PositiveFinite = 0.5
++    region_scale_sd: PositiveFinite = 0.5
++    month_scale_sd: PositiveFinite = 0.25
++    year_scale_sd: PositiveFinite = 0.25
++    persistence_concentration1: PositiveFinite = 8.0
++    persistence_concentration0: PositiveFinite = 2.0
 +    persistence_max: float = Field(default=0.95, gt=0.0, le=1.0)
-+    innovation_scale_sd: float = 0.1
-+    innovation_dispersion_sd: float = 0.5
-+    innovation_df: float = 5.0
++    innovation_scale_sd: PositiveFinite = 0.1
++    innovation_dispersion_sd: PositiveFinite = 0.5
++    innovation_df: float = Field(default=5.0, gt=2.0, allow_inf_nan=False)
 +
 +
 +class StateModelDiagnostics(_Strict):
@@ -1043,7 +1102,7 @@ index 8dcd9b0..f4706b6 100644
  
  
  class Config(_Strict):
-@@ -331,6 +447,7 @@ class Config(_Strict):
+@@ -331,6 +459,7 @@ class Config(_Strict):
      reconciliation: ReconciliationConfig
      baselines: BaselinesConfig
      disclosure: DisclosureConfig
@@ -1130,7 +1189,7 @@ index 45791f6..bab0217 100644
 
 Run: the Step 2 command.
 
-Expected: every test passes. Observed without `data/`: `53 passed, 2 skipped`. With `data/` linked, the moved pin in `test_stage4_acceptance.py` runs too.
+Expected: every test passes. Observed without `data/`: `55 passed, 2 skipped`. With `data/` linked, the moved pin in `test_stage4_acceptance.py` runs too.
 
 - [ ] **Step 5: Read both ids back, the canary and the pin**
 
@@ -1148,7 +1207,7 @@ uv run ruff format --check src tests && uv run ruff check src tests && uv run in
 uv run pytest -q -p no:cacheprovider -m "not slow"
 ```
 
-Expected: gates clean. Non-slow suite: Task 1's count **+ 14 passed** (13 new here, 1 new in `test_config_validation_block.py`; `test_config.py` renames two and adds none).
+Expected: gates clean. Non-slow suite: Task 1's count **+ 16 passed** (15 new here, 1 new in `test_config_validation_block.py`; `test_config.py` renames two and adds none).
 
 - [ ] **Step 7: Commit**
 
@@ -4425,11 +4484,12 @@ git commit -m "feat(models): §11.14's diagnostic gate in code, production and r
 - §17.4 row 6, "reconcile posterior draws", through the CLI on the committed fixture. Row 5's synthetic-data fit is Task 10's.
 - REQ-018 and INV-012 re-measured on the PERSISTED draws: `reconcile` reads the store back and checks the draws and their digest.
 - REQ-029 and §18.3 for a model failure, as Decision 9 states it. A failed gate exits 1, keeps `posterior/diagnostics.json`, writes nothing else, and leaves no earlier success behind it.
+- The repo's one cross-stage staleness check, `constraint_set_hash` (CLAUDE.md's gotcha on stale run directories): bounds solved against another constraint set are refused before anything is deleted (Decision 9).
 
 **Files:**
 - Modify: `src/logging_employment/cli.py` (`fit_state_model_command`, new; `reconcile_command`, extended)
 - Modify: `tests/integration/conftest.py` (`build_staged_repo` with config overrides; `make_staged_repo`)
-- Test: `tests/integration/test_cli_state_model.py` (new; 8 tests, 5 marked `slow`)
+- Test: `tests/integration/test_cli_state_model.py` (new; 9 tests, 5 marked `slow`)
 
 **Interfaces:**
 - Consumes: every earlier `models/` task. From Task 3, `STORE_PATH = "posterior/state_total_draws.nc"`, `MODEL_ID` and `MODEL_VERSION`. From Task 7, `write_store`, `read_store`, `store_digest` and `draws_digest`. From Task 8, `evaluate_gate` and `assert_gate_passes`. Also `baselines.runner.state_total_bounds`, and `cli._write_manifest`, `cli._input_digests`.
@@ -4656,6 +4716,26 @@ def test_the_fit_requires_solved_bounds(make_staged_repo) -> None:
     assert "INV-012" in result.output
 
 
+def test_bounds_from_another_constraint_set_are_refused_before_anything_is_deleted(
+    make_staged_repo,
+) -> None:
+    """`run_id` does not cover code, so `build-constraints` can re-run under the same id after a
+    code change and leave `deterministic_bounds.parquet` solved against the old constraint set.
+    `constraint_set_hash` is the cross-stage check that catches it, and it runs first: an earlier
+    fit's artifacts must survive a refusal."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER})
+    bounds_path = repo.run_dir / "deterministic_bounds.parquet"
+    stale = pl.read_parquet(bounds_path).with_columns(constraint_set_hash=pl.lit("stale0hash"))
+    stale.write_parquet(bounds_path)
+    earlier = repo.run_dir / "state_model_manifest.json"
+    earlier.write_text("from an earlier fit")
+    result = _invoke("fit-state-model", repo.config_path)
+    assert result.exit_code != 0
+    assert "stale0hash" in result.output
+    assert "solve-bounds" in result.output
+    assert earlier.read_text() == "from an earlier fit"
+
+
 def test_a_baseline_only_reconcile_writes_the_keys_it_always_wrote(staged_repo) -> None:
     """No store, no `state_model` key: omitted rather than null, as `run_id`'s optional keys are."""
     for command in ("run-baselines", "reconcile"):
@@ -4686,20 +4766,20 @@ Run: `uv run pytest tests/integration/test_cli_state_model.py -q`
 Expected (observed):
 
 ```text
-E         │ No such command 'fit-state-model'.                                           │
-E         ╰──────────────────────────────────────────────────────────────────────────────╯
 E       assert 2 == 0
 E        +  where 2 = <Result SystemExit(2)>.exit_code
 E       assert 2 == 1
 E       assert 'solve-bounds' in "Usage: root [OPTIONS] COMMAND [ARGS]...\nTry 'root --help' for help.\n╭─ Error ──────────────────────────────────────...                                 │\n╰──────────────────────────────────────────────────────────────────────────────╯\n"
 E        +  where "Usage: root [OPTIONS] COMMAND [ARGS]...\nTry 'root --help' for help.\n╭─ Error ──────────────────────────────────────...                                 │\n╰──────────────────────────────────────────────────────────────────────────────╯\n" = <Result SystemExit(2)>.output
+E       assert 'stale0hash' in "Usage: root [OPTIONS] COMMAND [ARGS]...\nTry 'root --help' for help.\n╭─ Error ──────────────────────────────────────...                                 │\n╰──────────────────────────────────────────────────────────────────────────────╯\n"
 FAILED tests/integration/test_cli_state_model.py::test_a_failed_gate_exits_1_and_leaves_only_its_report
 FAILED tests/integration/test_cli_state_model.py::test_the_fit_requires_solved_bounds
+FAILED tests/integration/test_cli_state_model.py::test_bounds_from_another_constraint_set_are_refused_before_anything_is_deleted
 ERROR tests/integration/test_cli_state_model.py::test_the_fit_writes_its_store_its_summary_and_its_manifest
 ERROR tests/integration/test_cli_state_model.py::test_every_stored_draw_satisfies_its_hard_constraints
 ERROR tests/integration/test_cli_state_model.py::test_the_fit_is_idempotent
 ERROR tests/integration/test_cli_state_model.py::test_reconcile_re_verifies_the_draws_on_disk
-2 failed, 2 passed, 4 errors
+3 failed, 2 passed, 4 errors
 ```
 
 Two tests pass here, and that is their job: they are guards on behaviour Step 3 must not change. `test_a_baseline_only_reconcile_writes_the_keys_it_always_wrote` guards `reconcile`'s existing manifest. `test_the_cli_starts_without_a_ppl` guards the Global Constraints' import discipline, which Step 3 is the first to put at risk.
@@ -4710,10 +4790,10 @@ Two tests pass here, and that is their job: they are guards on behaviour Step 3 
 
 ```diff
 diff --git a/src/logging_employment/cli.py b/src/logging_employment/cli.py
-index 07d380f..d42d359 100644
+index 07d380f..a1ef605 100644
 --- a/src/logging_employment/cli.py
 +++ b/src/logging_employment/cli.py
-@@ -382,6 +382,114 @@ def run_baselines_command(
+@@ -382,6 +382,125 @@ def run_baselines_command(
              typer.echo(f"declined {estimator_id} {kind} {count}")
  
  
@@ -4763,14 +4843,25 @@ index 07d380f..d42d359 100644
 +                f"{path} is missing: every draw is reconciled into this run's deterministic "
 +                f"bounds (INV-012), and no run matches the staged inputs. Run `{command}` first"
 +            )
++    # THE BOUNDS MUST BE THIS CONSTRAINT SET'S. `run_id` does not cover code, so `build-constraints`
++    # can re-run under the same id after a code change and leave the old `deterministic_bounds`
++    # beside a new `schema_manifest.json`. `constraint_set_hash` is the one cross-stage check that
++    # fires (CLAUDE.md), and it runs before anything is deleted, so a refusal keeps the last fit.
++    constraint_set_hash = json.loads(manifest_path.read_text())["constraint_set_hash"]
++    bounds = pl.read_parquet(bounds_path)
++    solved_against = sorted(set(bounds["constraint_set_hash"].to_list()))
++    if solved_against != [constraint_set_hash]:
++        raise typer.BadParameter(
++            f"{bounds_path} was solved against constraint set {solved_against}, but "
++            f"{manifest_path} names {constraint_set_hash!r}: `build-constraints` ran after "
++            "`solve-bounds`. Run `solve-bounds` first"
++        )
 +    posterior = run / "posterior"
 +    shutil.rmtree(posterior, ignore_errors=True)
 +    for stale in (run / "posterior_summary.parquet", run / "state_model_manifest.json"):
 +        stale.unlink(missing_ok=True)
 +    posterior.mkdir(parents=True)
 +
-+    constraint_set_hash = json.loads(manifest_path.read_text())["constraint_set_hash"]
-+    bounds = pl.read_parquet(bounds_path)
 +    monthly = data.qcew_monthly
 +    model_data = build_model_data(monthly)
 +    fit = fit_state_total_model(model_data, StateModelConfig.from_config(cfg.model))
@@ -4828,7 +4919,7 @@ index 07d380f..d42d359 100644
  @app.command("reconcile")
  def reconcile_command(
      config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
-@@ -419,19 +527,46 @@ def reconcile_command(
+@@ -419,19 +538,46 @@ def reconcile_command(
      # §16.1: "Every command MUST write a machine-readable manifest and MUST be idempotent for the
      # same inputs." A verifier that only echoes leaves nothing for §18.1 to reproduce against, so
      # the verdict and the digest of what was checked are persisted beside the results.
@@ -4894,7 +4985,7 @@ The `models` imports sit inside each command, as the Global Constraints require,
 
 Run: `uv run pytest tests/integration/test_cli_state_model.py -q`
 
-Expected: `8 passed`. **Four of the eight were never executed while this plan was written**: the four that take the `fitted` fixture, whose fit writes a store (Task 7's caveat). The other four were observed passing (`4 passed, 4 deselected`, the four deselected). If only the four fail, re-run Task 7's store tests first.
+Expected: `9 passed`. **Four of the nine were never executed while this plan was written**: the four that take the `fitted` fixture, whose fit writes a store (Task 7's caveat). The other five were observed passing (`5 passed, 4 deselected`, the four deselected). If only the four fail, re-run Task 7's store tests first.
 
 - [ ] **Step 5: See the command in `--help`**
 
@@ -4909,7 +5000,7 @@ uv run ruff format --check src tests && uv run ruff check src tests && uv run in
 uv run pytest -q -p no:cacheprovider -m "not slow"
 ```
 
-Expected: gates clean. Non-slow suite: Task 8's count **+ 3 passed**. The five `slow` tests ran in Step 4.
+Expected: gates clean. Non-slow suite: Task 8's count **+ 4 passed**. The five `slow` tests ran in Step 4.
 
 - [ ] **Step 7: Commit**
 
@@ -7416,7 +7507,7 @@ index bb1c4c7..ee8dda8 100644
 
 ```diff
 diff --git a/src/logging_employment/config.py b/src/logging_employment/config.py
-index f4706b6..f1f91cb 100644
+index 2c2d5d3..f89a0ff 100644
 --- a/src/logging_employment/config.py
 +++ b/src/logging_employment/config.py
 @@ -287,35 +287,23 @@ class ValidationConfig(_Strict):
@@ -7698,10 +7789,10 @@ The other four were deselected while this plan was written, because the `validat
 
 ```diff
 diff --git a/src/logging_employment/cli.py b/src/logging_employment/cli.py
-index d42d359..c9c73b7 100644
+index a1ef605..020ca3e 100644
 --- a/src/logging_employment/cli.py
 +++ b/src/logging_employment/cli.py
-@@ -672,3 +672,132 @@ def validate_command(
+@@ -683,3 +683,132 @@ def validate_command(
      _write_manifest(run / "validation_manifest.json", manifest)
      for regime, entry in sorted(result.manifest["regimes"].items()):
          typer.echo(f"{regime} {entry['disposition']} scored={entry['n_scored']}")
@@ -8005,7 +8096,7 @@ while plan 16 was written, and its docstrings give the arithmetic behind each on
 
 ````diff
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 8d85cbe..14b6729 100644
+index 8d85cbe..310b952 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -6,12 +6,13 @@
@@ -8019,8 +8110,8 @@ index 8d85cbe..14b6729 100644
 -# which skip without data/, and no test carries `network`: the expression removes nothing that
 -# would have run today. It keeps a future slow or live-endpoint test out of this tier instead.
 +# `-m "not slow and not network"` states the policy the markers declare. Measured at plan 16's
-+# Task 14 without data/ on the author's Mac: the bare run gives 1633 passed, 72 skipped; this one
-+# 1612 passed, 45 skipped, 48 deselected. A runner reports one more skip: one audit test skips
++# Task 14 without data/ on the author's Mac: the bare run gives 1636 passed, 72 skipped; this one
++# 1615 passed, 45 skipped, 48 deselected. A runner reports one more skip: one audit test skips
 +# without a personal file outside the repo (D-055). Of the 48 deselected, 27 are data-bound and
 +# would skip here anyway. The other 21 are plan 16's slow state-total model tests, which need no
 +# data/ and WOULD run: the expression keeps their minutes of NUTS sampling out of this tier on
@@ -8029,7 +8120,7 @@ index 8d85cbe..14b6729 100644
  
  on:
 diff --git a/CLAUDE.md b/CLAUDE.md
-index af0104e..06fe565 100644
+index af0104e..444723b 100644
 --- a/CLAUDE.md
 +++ b/CLAUDE.md
 @@ -3,8 +3,10 @@
@@ -8045,7 +8136,7 @@ index af0104e..06fe565 100644
  
  **The spec is authoritative and this codebase cites it constantly.**
  `specs/logging-employment-spec.md` — §3 estimand, §4 invariants (`INV-001`..`INV-016`), §6.2
-@@ -28,33 +30,47 @@ logging-estimates fetch --source qcew --config config.yaml   # or qcew_parent /
+@@ -28,33 +30,48 @@ logging-estimates fetch --source qcew --config config.yaml   # or qcew_parent /
                                                               # CENSUS_API_KEY from ./.env
  # then, in order:
  build-harmonized → build-constraints → solve-bounds → run-baselines → reconcile → validate
@@ -8074,8 +8165,9 @@ index af0104e..06fe565 100644
 +command list — four of §16.1's fifteen do not exist yet (`fit-size-model`, `disclosure-review`,
 +`publish`, `run-all`). `validate-state-model` is not one of the fifteen: plan 16 added it so that
 +`validate` stays the §13.10 comparand's command, byte for byte. `fit-state-model` gates on
-+`schema_manifest.json` and `deterministic_bounds.parquet`; `validate-state-model` on the three
-+`validation_*` tables and `posterior/diagnostics.json`.
++`schema_manifest.json` and `deterministic_bounds.parquet`, and refuses bounds solved against another
++`constraint_set_hash`; `validate-state-model` on the three `validation_*` tables and
++`posterior/diagnostics.json`.
 +
 +Markers are declared but never applied by `addopts`: `slow` is on one unit test and EIGHT
 +integration modules (thirteen `mark.slow` sites since plan 16, which added the three model
@@ -8094,7 +8186,7 @@ index af0104e..06fe565 100644
 +`data/` lives. Since plan 16 the expression DOES remove tests that would have run: the 21 slow
 +model tests (5 in `test_cli_state_model.py`, 6 in `test_cli_validate_state_model.py`, 10 in
 +`test_state_total_recovery.py`) need no `data/`, only minutes of NUTS. Collected at plan 16's
-+Task 14 without `data/`: a bare run is 1633 passed, 72 skipped; the hermetic tier 1612 passed, 45
++Task 14 without `data/`: a bare run is 1636 passed, 72 skipped; the hermetic tier 1615 passed, 45
 +skipped, 48 deselected (27 data-bound, 21 slow model tests). Those counts are THIS MAC's: on
 +ubuntu-latest one more test skips (1407 passed, 46 skipped, 27 deselected before plan 16, run
 +34765933053), because
@@ -8106,7 +8198,7 @@ index af0104e..06fe565 100644
  
  **Float goldens compare through `tests/golden_compare.py`, not `.equals`** (2026-09-13). The two
  float goldens (`test_validation_golden.py::test_the_metrics_match_the_golden`,
-@@ -75,7 +91,9 @@ diff old against new by join before re-pinning one (§17.6).
+@@ -75,7 +92,9 @@ diff old against new by join before re-pinning one (§17.6).
  five harmonized Parquet tables (`contracts.HarmonizedData`), never an endpoint. `build-constraints`
  turns those into a cell/row/coefficient system, `solve-bounds` bounds each component,
  `run-baselines` produces weights that `reconcile/` turns into estimates, `validate` re-runs it under
@@ -8117,7 +8209,7 @@ index af0104e..06fe565 100644
  
  | Module | Owns |
  |---|---|
-@@ -94,6 +112,7 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
+@@ -94,6 +113,7 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
  | `reconcile/` | §12 exact reconciliation → see `reconcile/CLAUDE.md` |
  | `baselines/` | §10 transparent baselines → see `baselines/CLAUDE.md` |
  | `validate/` | §13 pseudo-suppression harness → see `validate/CLAUDE.md` |
@@ -8125,7 +8217,7 @@ index af0104e..06fe565 100644
  | `registry/` | §7.1 source registry: row model, `registry/sources.yaml`, `registry verify`'s checks |
  | `disclosure/` | §9.8 flags only — `exact_reconstruction_flag`, `narrow_feasible_interval_flag`, on suppressed cells only, thresholds from config |
  
-@@ -177,6 +196,10 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
+@@ -177,13 +197,24 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
    fields to `SourcesConfig` and moved no id, because each is `Field(default=None, exclude=True)`
    and so reaches no dump — that is the second remedy, for a key nothing outside `config.py` reads. For a CLI-only choice use `run_id`'s `overrides`,
    omitting the key when unset (`runs.py` docstring), so existing runs keep their id.
@@ -8135,8 +8227,11 @@ index af0104e..06fe565 100644
 +  and the staged pin `4cf47a918dd8` → `dd7337e89047`.
  - **A run directory can be stale w.r.t. your code.** `run_id` ignores source, so editing an
    estimator and re-running overwrites the same `runs/<id>/`. The one cross-stage check that does
-   fire is `constraint_set_hash` (see `constraints/CLAUDE.md`).
-@@ -184,6 +207,11 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
+-  fire is `constraint_set_hash` (see `constraints/CLAUDE.md`).
++  fire is `constraint_set_hash` (see `constraints/CLAUDE.md`). `solve-bounds` checks the constraint
++  tables against it and `fit-state-model` checks the bounds (plan 16); `run-baselines` reads the
++  bounds without comparing.
+ - **CBP responses are not byte-reproducible** — set-identical rows in a different order, so each
    re-fetch stores another object for the same year. `build.snapshot_paths` raises
    `AmbiguousSnapshotError` (`build.py::snapshot_paths`) rather than stacking two snapshots of one key; pass the
    run manifest.
@@ -8350,7 +8445,7 @@ Expected: `13`. That is one unit test, plus eight integration modules, with `tes
 uv run pytest -q -p no:cacheprovider
 ```
 
-Expected: Task 0's bare count **+ 135 passed**, 0 failed, skipped unchanged. Most of the run is Task 0's slow D1 tests, about 12 minutes. Task 10 took 34 s when observed. Tasks 9 and 13 add their store tests, which never ran while this plan was written. Their fixtures fit at 2 chains of 60 warmup and 60 draws, and the three of their slow tests that did run took 29 s together, so expect minutes, not tens of minutes.
+Expected: Task 0's bare count **+ 138 passed**, 0 failed, skipped unchanged. Most of the run is Task 0's slow D1 tests, about 12 minutes. Task 10 took 34 s when observed. Tasks 9 and 13 add their store tests, which never ran while this plan was written. Their fixtures fit at 2 chains of 60 warmup and 60 draws, and the three of their slow tests that did run took 29 s together, so expect minutes, not tens of minutes.
 
 - [ ] **Step 5: Measure the two counts the guides quote, without `data/`**
 
@@ -8363,7 +8458,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow and not network"
 mv data.unlinked data && ls data/staged
 ```
 
-Expected: `1633 passed, 72 skipped` for the bare run, and `1612 passed, 45 skipped, 48 deselected` for the CI expression. Those are the numbers Step 2 wrote into `CLAUDE.md` and `ci.yml`. **If either differs, write the measured numbers into both files, and report the difference in the Task 15 log entry.** Never adjust a test to meet a written count. The arithmetic is the check: skipped stays at 72 and 45, because every test this plan adds runs without `data/`.
+Expected: `1636 passed, 72 skipped` for the bare run, and `1615 passed, 45 skipped, 48 deselected` for the CI expression. Those are the numbers Step 2 wrote into `CLAUDE.md` and `ci.yml`. **If either differs, write the measured numbers into both files, and report the difference in the Task 15 log entry.** Never adjust a test to meet a written count. The arithmetic is the check: skipped stays at 72 and 45, because every test this plan adds runs without `data/`.
 
 - [ ] **Step 6: Gates**
 
@@ -8577,7 +8672,7 @@ Append one entry to `specs/findings/stage-5-log.md`, in its own format (`## YYYY
 - Step 5a's count, by state;
 - Step 6's verdict, each gate's `passed`, and the command's wall time;
 - Task 12 Step 4's tripwire output, the evidence `D-109`'s done-when asks for;
-- a sentence saying what stays open for the Plan Completion Protocol: Decision 7's four flagged readings, Decision 15's open points (the cells whose interval is a bound, and the unstable means in NV and RI), and `D-116`'s and `D-115`'s dispositions (Decision 1).
+- a sentence saying what stays open for the Plan Completion Protocol: Decision 7's four flagged readings, Decision 15's open points (the cells whose interval is a bound, and the unstable means in NV and RI), `run-baselines`' unchecked bounds hash (Decision 9), and `D-116`'s and `D-115`'s dispositions (Decision 1).
 
 - [ ] **Step 9: Gates and commit**
 
@@ -8596,7 +8691,7 @@ Report:
 - the verdict, and which gates decided it;
 - whether §19 Phase 3's "diagnostics pass" holds.
 
-The Plan Completion Protocol comes next. Ticking Stage 5 in the roadmap, filing Decision 7's flagged readings and Decision 15's open points as deferred items, and ticking `D-109` all belong to it, not to this task.
+The Plan Completion Protocol comes next. Ticking Stage 5 in the roadmap, filing Decision 7's flagged readings, Decision 15's open points and Decision 9's `run-baselines` gap as deferred items, and ticking `D-109` all belong to it, not to this task.
 
 ---
 
