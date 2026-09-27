@@ -51,6 +51,7 @@ from ..errors import (
 )
 from ..reconcile.allocate import allocate
 from ..reconcile.anchor import (
+    Anchor,
     Partition,
     assert_universe_closes,
     closure_audit,
@@ -510,51 +511,14 @@ def run_baselines(
                     tolerance=config.reconciliation.tolerance,
                     quantity="estimate",
                 )
-            # The margin the integers must honour is the anchor's residual -- the published
-            # quantity being allocated -- so it is taken from the anchor rather than re-derived
-            # from the allocation. `allocate` and `scale_into_bounds` both make the values sum to
-            # R_t, so the two candidates cannot disagree; naming the anchor is the honest source.
-            integer_total = round(anchor.residual)
-            integers = (
-                integerize(
-                    allocated,
-                    total=integer_total,
-                    **(
-                        {}
-                        if scoped is None
-                        else integer_bounds(
-                            scoped, tolerance=config.constraints.feasibility_tolerance
-                        )
-                    ),
-                )
-                if config.reconciliation.integerize_release
-                else dict.fromkeys(allocated, None)
+            integers = release_integers(
+                allocated,
+                anchor,
+                bounds,
+                cell_ids=ids,
+                estimator_id=estimator.estimator_id,
+                config=config,
             )
-            if config.reconciliation.integerize_release and (
-                sum(integers.values()) != integer_total
-            ):
-                # §12.6 step 5, as defence in depth rather than an independent derivation:
-                # `integerize` already raises when it cannot place every unit, so this catches a
-                # regression in that contract. A bare `assert` would vanish under `python -O`.
-                raise InfeasibleResidualError(
-                    f"{month}: integerized estimates for {estimator.estimator_id} sum to "
-                    f"{sum(integers.values())}, not the required {integer_total}"
-                )
-            if bounds is not None and config.reconciliation.integerize_release:
-                # §12.6's integers are released too. `integerize` is now cut to the month's bounds,
-                # so this is defence in depth: checking only the float would leave the number
-                # actually published unchecked, which is the half INV-002 names. The tolerance is
-                # the one `integer_bounds` cut with -- the solver's -- so the check admits exactly
-                # what that cut was allowed to produce.
-                assert_within_bounds(
-                    {cell: float(value) for cell, value in integers.items() if value is not None},
-                    bounds,
-                    cell_ids=ids,
-                    estimator_id=estimator.estimator_id,
-                    reference_month=month,
-                    tolerance=config.constraints.feasibility_tolerance,
-                    quantity="estimate_integer",
-                )
             for cell in anchor.missing_cells:
                 rows.append(
                     {
@@ -578,6 +542,69 @@ def run_baselines(
     results = pl.DataFrame(rows, schema=BASELINE_RESULT_SCHEMA)
     assert_declared_provenance(results)
     return results, audit
+
+
+def release_integers(
+    allocated: dict[str, float],
+    anchor: Anchor,
+    bounds: Bounds | None,
+    *,
+    cell_ids: Mapping[str, str],
+    estimator_id: str,
+    config: Config,
+) -> dict[str, int | None]:
+    """§12.6's integers for one month's allocation, cut to its bounds and checked against them.
+
+    Every value is None when `reconciliation.integerize_release` is off. Extracted from
+    `run_baselines` by plan 16 so the model's harness rows (`models/validation.py`) are
+    integerized by the same cut, the same tiebreak and the same two checks as every baseline's,
+    rather than by a copy that could drift from them.
+
+    The margin the integers must honour is the anchor's residual -- the published quantity being
+    allocated -- so it is taken from the anchor rather than re-derived from the allocation.
+    `allocate` and `scale_into_bounds` both make the values sum to R_t, so the two candidates
+    cannot disagree; naming the anchor is the honest source.
+    """
+    if not config.reconciliation.integerize_release:
+        return dict.fromkeys(allocated, None)
+    month = anchor.reference_month
+    tolerance = config.constraints.feasibility_tolerance
+    scoped = (
+        None
+        if bounds is None
+        else month_bounds(bounds, cell_ids=cell_ids, cells=anchor.missing_cells)
+    )
+    integer_total = round(anchor.residual)
+    integers: dict[str, int | None] = dict(
+        integerize(
+            allocated,
+            total=integer_total,
+            **({} if scoped is None else integer_bounds(scoped, tolerance=tolerance)),
+        )
+    )
+    if sum(integers.values()) != integer_total:
+        # §12.6 step 5, as defence in depth rather than an independent derivation: `integerize`
+        # already raises when it cannot place every unit, so this catches a regression in that
+        # contract. A bare `assert` would vanish under `python -O`.
+        raise InfeasibleResidualError(
+            f"{month}: integerized estimates for {estimator_id} sum to "
+            f"{sum(integers.values())}, not the required {integer_total}"
+        )
+    if bounds is not None:
+        # §12.6's integers are released too. `integerize` is cut to the month's bounds, so this is
+        # defence in depth: checking only the float would leave the number actually published
+        # unchecked, which is the half INV-002 names. The tolerance is the one `integer_bounds` cut
+        # with -- the solver's -- so the check admits exactly what that cut was allowed to produce.
+        assert_within_bounds(
+            {cell: float(value) for cell, value in integers.items() if value is not None},
+            bounds,
+            cell_ids=cell_ids,
+            estimator_id=estimator_id,
+            reference_month=month,
+            tolerance=tolerance,
+            quantity="estimate_integer",
+        )
+    return integers
 
 
 def _decline_rows(

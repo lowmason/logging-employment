@@ -10,6 +10,7 @@ what separates the two, and it is on every row for that reason.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 
 import numpy as np
 import polars as pl
@@ -391,28 +392,121 @@ def probabilistic_metrics(
         # fewer than two scored cells) emits only the overall null row and NO division rows, by
         # design, so the two families do NOT always share strata: a §13.10 gate reading both must
         # OUTER-join them on the division, or it silently drops point-only estimators and interval
-        # families with fewer than two scored cells. A division
-        # whose masked cells all declined, or whose scored cells never reached a leave-one-out
-        # ensemble, has `seen == 0` and a NULL value, never 0.0. Each row carries ITS division's base:
-        # masked rows as `denominator`, scored rows as `n_scored`, ensembled rows as
-        # `calibration_sample_size`. Inheriting the estimator-wide `n_scored` from `common` would
-        # report more scored cells than the division has masked cells, an impossible state.
-        divisions = sorted(set(group["census_division"].to_list())) if stratify else []
-        for division in divisions:
-            in_division = group.filter(pl.col("census_division") == division)
-            seen, hits = by_division.get(division, (0, 0))
-            rows.append(
-                {
-                    **common,
-                    "stratum_kind": "census_division",
-                    "stratum_value": division,
-                    "metric_name": "coverage_0.90",
-                    "value": hits / seen if seen else None,
-                    "denominator": float(in_division.height),
-                    "n_scored": in_division.filter(pl.col("estimate").is_not_null()).height,
-                    "calibration_sample_size": seen,
-                }
+        # families with fewer than two scored cells.
+        if stratify:
+            rows.extend(_division_coverage_rows(group, by_division, common))
+    return pl.DataFrame(rows)
+
+
+def _division_coverage_rows(
+    group: pl.DataFrame, by_division: Mapping[str, list[int]], common: Mapping[str, object]
+) -> list[dict[str, object]]:
+    """One `coverage_0.90` row per division `group` has masked cells in, from the loop's tally.
+
+    A division whose masked cells all declined, or whose scored cells never reached an interval,
+    has `seen == 0` and a NULL value, never 0.0. Each row carries ITS division's base: masked rows
+    as `denominator`, scored rows as `n_scored`, interval-bearing rows as
+    `calibration_sample_size`. Inheriting the estimator-wide `n_scored` from `common` would report
+    more scored cells than the division has masked cells, an impossible state. Shared by both
+    interval sources so the two cannot stratify differently (plan 16).
+    """
+    rows: list[dict[str, object]] = []
+    for division in sorted(set(group["census_division"].to_list())):
+        in_division = group.filter(pl.col("census_division") == division)
+        seen, hits = by_division.get(division, (0, 0))
+        rows.append(
+            {
+                **common,
+                "stratum_kind": "census_division",
+                "stratum_value": division,
+                "metric_name": "coverage_0.90",
+                "value": hits / seen if seen else None,
+                "denominator": float(in_division.height),
+                "n_scored": in_division.filter(pl.col("estimate").is_not_null()).height,
+                "calibration_sample_size": seen,
+            }
+        )
+    return rows
+
+
+def draw_interval_metrics(
+    scores: pl.DataFrame,
+    *,
+    regime: str,
+    seed: int,
+    arm: str,
+    ensembles: Mapping[str, np.ndarray],
+) -> pl.DataFrame:
+    """§13.7's coverage, width and CRPS from a model's own predictive draws, keyed by `cell_id`.
+
+    The rows `probabilistic_metrics` writes, over the same levels and strata and through the same
+    `_division_coverage_rows`, with `interval_source = 'reconciled_posterior_draws'`. Each scored
+    cell's interval and CRPS come from its OWN reconciled joint draws (§12.7), so nothing is pooled
+    across cells: there is no leave-one-out to take and no minimum sample below which a cell goes
+    unscored. Nothing is clipped either, because every draw already lies inside the cell's
+    deterministic interval and no lower bound is negative. `n_clipped_at_zero` is written as 0.0
+    so both interval sources carry the same metric set.
+
+    A scored cell with no draws is refused rather than skipped: skipping would score the model on
+    the cells it happened to cover.
+    """
+    rows: list[dict[str, object]] = []
+    stratify = arm == "state_total"
+    frame = with_census_division(scores) if stratify else scores
+    for (estimator,), group in frame.group_by("estimator_id", maintain_order=True):
+        scored = group.filter(pl.col("estimate").is_not_null())
+        missing = sorted(set(scored["cell_id"].to_list()) - set(ensembles))
+        if missing:
+            raise ConceptViolationError(
+                f"{regime} seed {seed}: {len(missing)} scored cell(s) of {estimator} carry no "
+                f"draws, first {missing[:5]}; an interval metric over the rest would score the "
+                "model on the cells it happened to cover"
             )
+        common = {
+            **_OVERALL,
+            "regime": regime,
+            "seed": seed,
+            "mask_arm": arm,
+            "estimator_id": str(estimator),
+            "metric_family": "probabilistic",
+            "denominator": float(group.height),
+            "denominator_basis": "masked_cell_rows",
+            "n_scored": scored.height,
+            "interval_source": "reconciled_posterior_draws" if scored.height else "none",
+            "calibration_sample_size": scored.height,
+        }
+        if scored.is_empty():
+            rows.append({**common, "metric_name": "coverage_0.90", "value": None})
+            continue
+        covered = dict.fromkeys(_LEVELS, 0)
+        widths: list[float] = []
+        crps_values: list[float] = []
+        by_division: dict[str, list[int]] = {}
+        for row in scored.iter_rows(named=True):
+            ensemble = np.asarray(ensembles[row["cell_id"]], dtype=float)
+            for level in _LEVELS:
+                lo, hi = empirical_interval(ensemble, level)
+                hit = lo <= row["truth"] <= hi
+                covered[level] += int(hit)
+                if level == 0.90:
+                    widths.append(hi - lo)
+                    if stratify:
+                        tally = by_division.setdefault(row["census_division"], [0, 0])
+                        tally[0] += 1
+                        tally[1] += int(hit)
+            crps_values.append(crps(ensemble, row["truth"]))
+        n = len(crps_values)
+        for level in _LEVELS:
+            rows.append(
+                {**common, "metric_name": f"coverage_{level:.2f}", "value": covered[level] / n}
+            )
+        rows.append(
+            {**common, "metric_name": "mean_interval_width_0.90", "value": float(np.mean(widths))}
+        )
+        rows.append({**common, "metric_name": "crps", "value": float(np.mean(crps_values))})
+        rows.append({**common, "metric_name": "n_clipped_at_zero", "value": 0.0})
+        if stratify:
+            rows.extend(_division_coverage_rows(group, by_division, common))
     return pl.DataFrame(rows)
 
 

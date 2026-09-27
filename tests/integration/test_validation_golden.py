@@ -126,17 +126,24 @@ def test_the_interval_source_names_leave_one_out_rather_than_rolling(fixture_run
     pool is every OTHER scored residual in the same (regime, seed, arm, estimator) group, with no
     time ordering and no window. Nothing rolls. The old value `rolling_residual_ensemble` promised
     §13.10's coverage gate a time-ordered interval that the code never computed, and the gate
-    cannot tell the difference: `interval_source` is outside `assert_declared_provenance`'s six
-    closed-set checks, so `INTERVAL_SOURCES` is checked by nothing at runtime and this test IS the check.
+    cannot tell the difference. Since plan 16, `assert_declared_provenance` refuses a value outside
+    `INTERVAL_SOURCES` at runtime. Plan 16 also added the model's own source,
+    `reconciled_posterior_draws`, which no baseline row may carry, and this test pins that.
 
     Scope is the label. A time-ordered rolling interval is explicitly NOT built here
-    (`specs/completed/stage5-preconditions.md` §4).
+    (`specs/completed/stage5-preconditions.md` §4), and plan 16 did not build one either.
     """
-    assert INTERVAL_SOURCES == ("leave_one_out_residual_ensemble", "none")
+    assert INTERVAL_SOURCES == (
+        "leave_one_out_residual_ensemble",
+        "reconciled_posterior_draws",
+        "none",
+    )
     golden = pl.read_parquet(GOLDEN)
     for frame, origin in ((golden, "golden"), (fixture_run.metrics, "produced")):
         sources = set(frame["interval_source"].drop_nulls().to_list())
-        assert sources <= set(INTERVAL_SOURCES), f"{origin} carries {sorted(sources)}"
+        assert sources <= {"leave_one_out_residual_ensemble", "none"}, (
+            f"{origin} carries {sorted(sources)}"
+        )
         assert "leave_one_out_residual_ensemble" in sources, origin
 
 

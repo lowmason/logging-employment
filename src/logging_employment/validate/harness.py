@@ -21,8 +21,9 @@ shipped three-seed, full-registry run is 11:03.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Protocol
 
 import polars as pl
 
@@ -62,22 +63,89 @@ class ValidationResult:
     manifest: dict[str, object]
 
 
+@dataclass(frozen=True)
+class Production:
+    """One replicate's rows to score, and how to score their intervals.
+
+    `results` has `BASELINE_RESULT_SCHEMA`'s shape: every missing cell of every month the masked
+    frame leaves missing, estimate or decline, exactly as `run_baselines` returns it.
+    `interval_metrics` is called on the scored rows with `regime`, `seed` and `arm` and returns
+    §13.7's rows. `notes` rides into the regime's manifest entry only when it is non-empty, so the
+    baseline path writes the manifest it wrote before this seam existed.
+    """
+
+    results: pl.DataFrame
+    interval_metrics: Callable[..., pl.DataFrame]
+    notes: Mapping[str, object] = field(default_factory=dict)
+
+
+class Producer(Protocol):
+    """Whatever turns one masked frame into scoreable rows: §10's registry, or a model.
+
+    Plan 16 added this seam so the state-total model is scored by THIS loop. The masks, the
+    leakage guard, the masked bounds (`D-087`), step 6's rejection, the primary-like precondition
+    and every §13.5-§13.8 emitter are then the ones the baselines were scored under, rather than a
+    second copy that could drift from them.
+    """
+
+    estimator_ids: tuple[str, ...]
+
+    def __call__(self, masked: HarmonizedData, system: MaskedSystem, config: Config) -> Production:
+        """Rows for one replicate, from the masked frame and the MASKED system's bounds."""
+        ...
+
+
+@dataclass(frozen=True)
+class BaselineProducer:
+    """§10's registry as a `Producer`: `run_baselines` under the masked bounds (`D-087`)."""
+
+    estimators: tuple[Estimator, ...]
+
+    @property
+    def estimator_ids(self) -> tuple[str, ...]:
+        """The ids in the order given, which is the manifest's `estimators` list."""
+        return tuple(estimator.estimator_id for estimator in self.estimators)
+
+    def __call__(self, masked: HarmonizedData, system: MaskedSystem, config: Config) -> Production:
+        """§10's rows, with §13.7's leave-one-out intervals for them."""
+        # D-087: the MASKED bounds, never the run directory's, which still contain the truth
+        # this replicate hid (§13.4). `run_baselines` scales an estimate a finite bound binds on
+        # back into it (§12.3) exactly as production does, so the scoreboard ranks the
+        # estimates a release would publish rather than ones production would have rescaled.
+        results, _audit = run_baselines(
+            masked, config, estimators=self.estimators, bounds=state_total_bounds(system.bounds)
+        )
+        return Production(results=results, interval_metrics=probabilistic_metrics)
+
+
 def run_pseudo_suppression(
     data: HarmonizedData,
-    estimators: Sequence[Estimator] = REGISTRY,
+    estimators: Sequence[Estimator] | None = None,
     config: Config | None = None,
+    *,
+    producer: Producer | None = None,
 ) -> ValidationResult:
     """Every enabled regime, every seed. Refuses rather than skipping.
 
     `config` is keyword-optional only so the §16.2 argument ORDER survives; it is required in
     fact. A bare `assert` would vanish under `python -O`, and this package raises typed errors for
     caller mistakes everywhere else.
+
+    `estimators` (default: §10's whole `REGISTRY`) and `producer` are two ways to name what is
+    scored, and passing both is refused rather than letting one silently win.
     """
     if config is None:
         raise ConceptViolationError(
             "run_pseudo_suppression requires a Config: the harness needs `config.constraints` for "
             "solve_bounds and the full object for run_baselines"
         )
+    if producer is not None and estimators is not None:
+        raise ConceptViolationError(
+            "run_pseudo_suppression takes estimators OR a producer, not both: a producer decides "
+            "what is scored, and an estimator list beside it would be silently ignored"
+        )
+    if producer is None:
+        producer = BaselineProducer(tuple(REGISTRY if estimators is None else estimators))
     all_scores: list[pl.DataFrame] = []
     all_metrics: list[pl.DataFrame] = []
     regimes: dict[str, dict[str, object]] = {}
@@ -89,7 +157,7 @@ def run_pseudo_suppression(
             "n_scored": 0,
             "replicates": 0,
             "hashes": [],
-            "estimators": [e.estimator_id for e in estimators],
+            "estimators": list(producer.estimator_ids),
             "rejected_exactly_recoverable": 0,
         }
         # THE SWITCH IS CHECKED FIRST, AND THE FAIL-CLOSED REFUSAL SECOND. Order matters: an
@@ -160,13 +228,10 @@ def run_pseudo_suppression(
             masked, truth = apply_mask(data, targets)
             assert_no_retained_truth(masked, truth)
             system = mask_and_solve(data, targets, config)
-            # D-087: the MASKED bounds, never the run directory's, which still contain the truth
-            # this replicate hid (§13.4). `run_baselines` scales an estimate a finite bound binds on
-            # back into it (§12.3) exactly as production does, so the scoreboard ranks the
-            # estimates a release would publish rather than ones production would have rescaled.
-            results, _audit = run_baselines(
-                masked, config, estimators=estimators, bounds=state_total_bounds(system.bounds)
-            )
+            production = producer(masked, system, config)
+            results = production.results
+            if production.notes:
+                entry.setdefault("producer_notes", []).append({"seed": seed, **production.notes})
             joined = _join_truth(
                 results, truth, system, targets, regime=name, seed=seed, replicate=replicate
             )
@@ -197,7 +262,7 @@ def run_pseudo_suppression(
             # estimates, and stay on `scored`.
             all_metrics.append(bound_metrics(joined, regime=name, seed=seed, arm=arm))
             all_metrics.append(decline_and_basis_report(scored, regime=name, seed=seed, arm=arm))
-            all_metrics.append(probabilistic_metrics(scored, regime=name, seed=seed, arm=arm))
+            all_metrics.append(production.interval_metrics(scored, regime=name, seed=seed, arm=arm))
             all_metrics.append(
                 constraint_metrics(
                     scored,
@@ -237,9 +302,9 @@ def run_pseudo_suppression(
         # thirty-five (0, 0) frames is (0, 0), and the shaped branch is skipped. The emptiness
         # that matters is the RESULT's, not the accumulator's.
         metrics = pl.DataFrame(schema=VALIDATION_METRIC_SCHEMA)
-    # The metrics frame gets the same closed-set gate the scores frame has had (R-S5G-1).
-    # Declaring `STRATUM_KINDS` without a caller would repeat `INTERVAL_SOURCES`, which its own
-    # comment in `contracts.py` records as enforced by nothing at runtime.
+    # The metrics frame gets the same closed-set gate the scores frame has had (R-S5G-1). Since
+    # plan 16 that includes `interval_source`, so a producer's interval rows cannot name a source
+    # `contracts.INTERVAL_SOURCES` does not declare.
     assert_declared_provenance(metrics)
     board = build_scoreboard(metrics)
     return ValidationResult(scores, metrics, board, manifest)

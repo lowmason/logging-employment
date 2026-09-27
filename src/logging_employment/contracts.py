@@ -235,9 +235,9 @@ DECLINE_KINDS: tuple[str, ...] = ("by_design", "data_gap", "reconciliation_failu
 def assert_declared_provenance(frame: pl.DataFrame) -> None:
     """Refuse a provenance value outside its declared tuple.
 
-    The eight tuples this checks (`RECONCILIATION_STATUSES`, `WEIGHT_BASES`, `ANCHOR_BASES`,
-    `DECLINE_KINDS`, `SUPPRESSION_TYPES`, `STRATUM_KINDS`, `MASK_ARMS`, `OBSERVED_OR_IMPUTED`) are
-    the closed sets a row's provenance may draw from, but
+    The nine tuples this checks (`RECONCILIATION_STATUSES`, `WEIGHT_BASES`, `ANCHOR_BASES`,
+    `DECLINE_KINDS`, `SUPPRESSION_TYPES`, `STRATUM_KINDS`, `MASK_ARMS`, `INTERVAL_SOURCES`,
+    `OBSERVED_OR_IMPUTED`) are the closed sets a row's provenance may draw from, but
     `BASELINE_RESULT_SCHEMA` checks dtypes only -- `pl.String` accepts any string. `weight_basis`
     is the live exposure: `run_baselines` copies it from an estimator's own `outcome.basis`, so a
     third-party estimator's typo reached `baseline_results.parquet` and passed every test. Nulls
@@ -251,14 +251,17 @@ def assert_declared_provenance(frame: pl.DataFrame) -> None:
         ("suppression_type", SUPPRESSION_TYPES),
         # R-S5G-1. Added with a CALLER: `validate/harness.py` runs this over the assembled metrics
         # frame, and `tests/unit/test_contracts_validation.py` refuses an undeclared value.
-        # `INTERVAL_SOURCES` is the cautionary case: its own comment in this module records it as
-        # enforced by nothing at runtime, and a second declared-but-unenforced set is what this
-        # avoids.
+        # `INTERVAL_SOURCES` was the cautionary case, declared and enforced by nothing at runtime,
+        # until plan 16 added it below.
         ("stratum_kind", STRATUM_KINDS),
         # D-082. Since plan 12 `mask_arm` is PRODUCED from `MaskTarget.arm` rather than written as
         # a literal at the emit sites, so its value comes from data. Both harness calls pass a
         # frame that carries it: the scored frame and the assembled metrics.
         ("mask_arm", MASK_ARMS),
+        # Plan 16, with a caller on day one: the harness gates its assembled metrics here, and
+        # §13.10's promotion record refuses a model coverage row from any source but the model's
+        # own draws. Until plan 16 this set was enforced by nothing at runtime.
+        ("interval_source", INTERVAL_SOURCES),
         # Plan 16. §7.11 names the column and gives no values; `models/summary.py` writes two.
         ("observed_or_imputed", OBSERVED_OR_IMPUTED),
     ):
@@ -509,19 +512,22 @@ MASK_ARMS: tuple[str, ...] = ("state_total", "national_size")
 STRATUM_KINDS: tuple[str, ...] = ("overall", "census_division")
 
 # What produced a probabilistic row's interval, named for what the code computes. Until R-S5P-7
-# this value was named for a ROLLING window that `validate/metrics.py` has never computed: it
+# the first value was named for a ROLLING window that `validate/metrics.py` has never computed: it
 # builds each ensemble from `np.delete(residual_pool, position)` — every OTHER scored residual in
 # the same (regime, seed, arm, estimator) group, leave-one-out by INDEX, no time ordering, no
 # window. (The superseded string is spelled out in the test named below, so a reader who greps for
 # it lands on the reason; it is deliberately not repeated in `src/`.)
-# §13.10's coverage gate reads these intervals and cannot tell a time-ordered interval from this
-# one, so the name is the only thing carrying the distinction. Unlike WEIGHT_BASES and its five
-# siblings above (STRATUM_KINDS joined them in R-S5G-1), this tuple is enforced by nothing at
-# runtime — `assert_declared_provenance` does not cover `interval_source` — so
-# `tests/integration/test_validation_golden.py` is its only check.
-# Renaming the value here does not build the rolling version; that is Stage 5's, per
-# `specs/completed/stage5-preconditions.md` §4.
-INTERVAL_SOURCES: tuple[str, ...] = ("leave_one_out_residual_ensemble", "none")
+# `reconciled_posterior_draws` is plan 16's: `metrics.draw_interval_metrics` reads each cell's
+# interval off the state-total model's own reconciled joint draws (§12.7), pooling nothing across
+# cells. §13.10's coverage gate reads both kinds and cannot tell one from another, so the name is
+# the only thing carrying the distinction, and since plan 16 `assert_declared_provenance` enforces
+# it. The time-ordered rolling version of §10.7 is still not built; plan 16's model intervals do not
+# need one, and the baselines' leave-one-out stays what it is.
+INTERVAL_SOURCES: tuple[str, ...] = (
+    "leave_one_out_residual_ensemble",
+    "reconciled_posterior_draws",
+    "none",
+)
 
 # One row per (regime, seed, replicate, estimator, cell): the raw scored observations, including
 # the ones that were declined. Distinct in grain from VALIDATION_METRIC_SCHEMA below, and
