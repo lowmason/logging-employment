@@ -47,10 +47,8 @@ KEEP: dict[str, str] = {
 # first, sees this test name the site as unclassified, and then converts it. Empty when the sweep
 # is complete, and deleted then.
 PENDING: dict[str, str] = {
-    "baselines/runner.py::preferred_estimator": "Task 4",
     "reconcile/scaling.py::Bounds.__post_init__": "Task 5",
     "store.py::assert_no_secret": "Task 5",
-    "validate/regimes.py::select_targets": "Task 4",
 }
 
 
