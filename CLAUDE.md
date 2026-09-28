@@ -54,8 +54,11 @@ command list — four of §16.1's fifteen do not exist yet (`fit-size-model`, `d
 (`cli.py::_stale_fit`): a fit outlives its constraint set whenever `build-constraints` re-runs
 without a re-fit, and its draws would re-verify clean against their own bounds. They also refuse,
 unread, a fit whose report records a pass while its store, `posterior_summary.parquet` or
-`state_model_manifest.json` is missing (`cli.py::_unfinished_fit`): the report is written first, so
-an interrupted fit leaves a pass beside draws that were never written.
+`state_model_manifest.json` is missing or cannot be read or parsed, or a digest the manifest records
+does not match (`cli.py::_unfinished_fit`): the report is written first, so an interrupted fit
+leaves a pass beside draws that were never written, and a file's existence does not prove it whole.
+Neither check raises on an artifact it cannot read, the report included: each refuses it, so
+`reconcile` still writes its verdict.
 
 Markers are declared but never applied by `addopts`: `slow` is on one unit test and EIGHT
 integration modules (seventeen `mark.slow` sites since plan 16, which added the three model
@@ -130,7 +133,9 @@ in `runs/<run_id>/` beside one JSON manifest per command.
   `cli.py::_input_digests`); optional keys are *omitted*, never null, so they do not re-id existing runs. The
   id therefore covers config + input data but **not source code** — which is why every JSON RUN
   manifest also carries `code_commit` and `uv_lock_sha256` from `runs.code_provenance` (plan 13, R-S5P-5),
-  written through the single `cli.py::_write_manifest`. (`runs/source_manifest.parquet`
+  written through the single `cli.py::_write_manifest`, which replaces each manifest whole: a
+  `.partial` sibling, then `os.replace`, so a full disk never leaves one truncated (Codex on #42).
+  (`runs/source_manifest.parquet`
   carries neither — `fetching.write_source_manifest` does not go through that writer.) Those sit BESIDE the id, never inside it:
   hashing the commit in would rename every run directory on every commit. `code_provenance`
   records, never raises — `"unknown"` when unanswerable — and marks a dirty tree `<sha>-dirty`,

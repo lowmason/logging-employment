@@ -12,6 +12,8 @@ and is not frozen in any useful sense.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +25,7 @@ from typer.testing import CliRunner
 
 from logging_employment.cli import _input_digests, app
 from logging_employment.config import load_config
+from logging_employment.models.interfaces import STORE_PATH
 from logging_employment.runs import run_dir, run_id
 
 REPO = Path(__file__).resolve().parents[2]
@@ -105,3 +108,67 @@ def make_staged_repo(tmp_path_factory: pytest.TempPathFactory) -> Callable[..., 
         return build_staged_repo(tmp_path_factory.mktemp("repo"), overrides=overrides)
 
     return _build
+
+
+@pytest.fixture()
+def plant_finished_fit() -> Callable[..., None]:
+    """Plant what a passing `fit-state-model` leaves in a run, whole or with one artifact damaged.
+
+    Each artifact is the least that `cli.py::_unfinished_fit` accepts, not a real fit: a passing
+    report naming `constraint_set_hash`, a store holding only its `draws_sha256` root attribute, a
+    few bytes of summary, and a manifest recording both digests. So a command that got past the
+    check would crash reading the store's draws, not pass, and a test that damages one artifact
+    isolates the refusal to it. `damage` is one of:
+
+    - `manifest_cut_short`: the manifest's first half, as a full disk left it before `os.replace`;
+    - `manifest_is_a_directory`: a directory where the manifest was. It exists, and reading it
+      raises `OSError`, as a permission or I/O error would. A directory rather than `chmod 000`,
+      which root can still read;
+    - `store_cut_short`: the store without its last eight bytes;
+    - `store_from_another_fit`: a whole store whose digest the manifest does not record;
+    - `summary_rewritten`: other bytes in `posterior_summary.parquet`;
+    - `summary_is_a_directory`: a directory where the summary was, as for the manifest.
+
+    xarray is imported inside, so an integration test that plants no fit never loads it.
+    """
+
+    def _plant(run: Path, constraint_set_hash: str, *, damage: str | None = None) -> None:
+        import xarray as xr
+
+        from logging_employment.models.arviz_io import STORE_ENGINE
+
+        def store(draws_sha256: str) -> None:
+            root = xr.Dataset(attrs={"draws_sha256": draws_sha256})
+            xr.DataTree.from_dict({"/": root}).to_netcdf(run / STORE_PATH, engine=STORE_ENGINE)
+
+        (run / "posterior").mkdir(parents=True, exist_ok=True)
+        report = {"passed": True, "failures": [], "constraint_set_hash": constraint_set_hash}
+        (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+        store("d" * 64)
+        summary = run / "posterior_summary.parquet"
+        summary.write_bytes(b"a posterior summary")
+        manifest = run / "state_model_manifest.json"
+        recorded = {
+            "draws_sha256": "d" * 64,
+            "store": STORE_PATH,
+            "posterior_summary_sha256": hashlib.sha256(summary.read_bytes()).hexdigest(),
+        }
+        manifest.write_text(json.dumps(recorded))
+        if damage == "manifest_cut_short":
+            manifest.write_bytes(manifest.read_bytes()[: manifest.stat().st_size // 2])
+        elif damage == "manifest_is_a_directory":
+            manifest.unlink()
+            manifest.mkdir()
+        elif damage == "store_cut_short":
+            (run / STORE_PATH).write_bytes((run / STORE_PATH).read_bytes()[:-8])
+        elif damage == "store_from_another_fit":
+            store("e" * 64)
+        elif damage == "summary_rewritten":
+            summary.write_bytes(b"another posterior summary")
+        elif damage == "summary_is_a_directory":
+            summary.unlink()
+            summary.mkdir()
+        elif damage is not None:
+            raise ValueError(f"no such damage: {damage!r}")
+
+    return _plant

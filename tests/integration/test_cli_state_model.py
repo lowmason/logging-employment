@@ -18,7 +18,7 @@ import polars as pl
 import pytest
 from typer.testing import CliRunner
 
-from logging_employment.cli import app
+from logging_employment.cli import _stale_fit, _unfinished_fit, app
 from logging_employment.models.arviz_io import draws_digest, read_store
 from logging_employment.models.interfaces import STORE_PATH
 from logging_employment.models.reconciliation import check_reconciled
@@ -44,6 +44,16 @@ INTERRUPTIONS = {
     "before_the_summary": (STORE_PATH,),
     "before_the_manifest": (STORE_PATH, "posterior_summary.parquet"),
     "store_deleted_later": ("posterior_summary.parquet", "state_model_manifest.json"),
+}
+# Every artifact present, one damaged (`conftest.py::plant_finished_fit`), and what
+# `cli.py::_unfinished_fit` finds.
+DAMAGE = {
+    "manifest_cut_short": {"unreadable": ["state_model_manifest.json"]},
+    "manifest_is_a_directory": {"unreadable": ["state_model_manifest.json"]},
+    "store_cut_short": {"unreadable": [STORE_PATH]},
+    "store_from_another_fit": {"mismatched": [STORE_PATH]},
+    "summary_rewritten": {"mismatched": ["posterior_summary.parquet"]},
+    "summary_is_a_directory": {"unreadable": ["posterior_summary.parquet"]},
 }
 
 
@@ -233,6 +243,76 @@ def test_reconcile_fails_an_unfinished_fit_without_reading_it(staged_repo, writt
         "missing": [artifact for artifact in FIT_ARTIFACTS if artifact not in written],
         "passed": False,
     }
+
+
+@pytest.mark.parametrize(("damage", "found"), list(DAMAGE.items()), ids=list(DAMAGE))
+def test_reconcile_fails_a_fit_its_manifest_does_not_vouch_for_without_reading_it(
+    staged_repo, plant_finished_fit, damage, found
+) -> None:
+    """Codex on #42. An artifact's existence does not prove the fit finished writing it: a full
+    disk left a manifest cut short, and it still existed. So the manifest must parse, and the
+    digests it records must match the store and the summary. `reconcile` fails any other fit
+    unread, naming what it found. The planted store holds only its digest, so reading its draws
+    would crash, not record."""
+    result = _invoke("run-baselines", staged_repo.config_path)
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    plant_finished_fit(run, current, damage=damage)
+    result = _invoke("reconcile", staged_repo.config_path)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert "fit-state-model" in result.output
+    manifest = json.loads((run / "reconcile_manifest.json").read_text())
+    assert manifest["within_tolerance"] is True
+    assert manifest["state_model"] == {**found, "passed": False}
+
+
+@pytest.mark.parametrize("with_store", [True, False], ids=["with_a_store", "without_a_store"])
+def test_reconcile_records_a_fit_whose_report_cannot_be_read(staged_repo, with_store) -> None:
+    """Codex on #43. A report that exists but cannot be read raised out of `_stale_fit` or
+    `_unfinished_fit`, so `reconcile` wrote no manifest at all (§16.1). It records the fit as
+    failed instead, and which check names the fault depends on which runs: with a store,
+    `_stale_fit` finds no recorded constraint set, and without one, `_unfinished_fit` finds the
+    report unreadable. The report is a directory, which fails to read as a permission or I/O error
+    would, and does so even as root."""
+    result = _invoke("run-baselines", staged_repo.config_path)
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    (run / "posterior" / "diagnostics.json").mkdir(parents=True)
+    if with_store:
+        (run / STORE_PATH).write_text("from a fit whose report cannot be read")
+    result = _invoke("reconcile", staged_repo.config_path)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert "fit-state-model" in result.output
+    manifest = json.loads((run / "reconcile_manifest.json").read_text())
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    found = (
+        {"fit_constraint_set_hash": None, "constraint_set_hash": current}
+        if with_store
+        else {"unreadable": ["posterior/diagnostics.json"]}
+    )
+    assert manifest["within_tolerance"] is True
+    assert manifest["state_model"] == {**found, "passed": False}
+
+
+def test_a_report_that_is_not_an_object_is_refused_by_both_checks(tmp_path) -> None:
+    """A report that parses to anything but a JSON object records neither a pass nor a constraint
+    set, so both checks refuse it. `.get` on the list below raised instead."""
+    (tmp_path / "posterior").mkdir()
+    (tmp_path / "posterior" / "diagnostics.json").write_text("[]")
+    (tmp_path / "schema_manifest.json").write_text(json.dumps({"constraint_set_hash": "h"}))
+    assert _stale_fit(tmp_path) == {"fit_constraint_set_hash": None, "constraint_set_hash": "h"}
+    assert _unfinished_fit(tmp_path) == {"unreadable": ["posterior/diagnostics.json"]}
+
+
+def test_a_passing_fit_whose_artifacts_agree_is_finished(tmp_path, plant_finished_fit) -> None:
+    """The control for every damage case: the same planted fit, undamaged, is accepted, so each
+    refusal above is its damage's doing. That a REAL fit's artifacts agree is the slow tests' to
+    show (`test_reconcile_re_verifies_the_draws_on_disk`, and `validate-state-model`'s)."""
+    plant_finished_fit(tmp_path, "any0hash")
+    assert _unfinished_fit(tmp_path) is None
 
 
 def test_a_failed_fits_report_alone_is_not_an_unfinished_fit(staged_repo) -> None:

@@ -113,12 +113,28 @@ def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
     `indent=2, sort_keys=True` shape every one of these files already had -- `solve-bounds` reads
     `schema_manifest.json` as a precondition gate and an integration test pins its bytes, so the
     formatting is not free to drift.
+
+    A MANIFEST IS REPLACED WHOLE (Codex on #42). `Path.write_text` truncates before it writes, so
+    a full disk or a kill mid-write left an empty or partial manifest where readers look, and
+    `_unfinished_fit` read that file's existence as a finished fit. It now parses the manifest and
+    checks the digests it records, and a manifest written here is never partial. The text goes to a
+    `.partial` sibling, and `os.replace` renames it over the manifest, which is atomic within a
+    directory. A write that fails removes its sibling. A process killed outright can leave one, and
+    no reader opens it.
     """
     import json
+    import os
 
     from .runs import code_provenance
 
-    path.write_text(json.dumps({**payload, **code_provenance()}, indent=2, sort_keys=True))
+    text = json.dumps({**payload, **code_provenance()}, indent=2, sort_keys=True)
+    partial = path.with_name(f"{path.name}.partial")
+    try:
+        partial.write_text(text)
+        os.replace(partial, path)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
 
 
 def _input_digests(cfg: Config) -> dict[str, str]:
@@ -398,9 +414,10 @@ def fit_state_model_command(
     evidence. The command then exits 1 and writes no store, no summary and no manifest.
     `validate-state-model` reads the report and records the model as not beaten without scoring it.
     A pass writes the store, the summary and, last, the manifest, so a passing report does not by
-    itself prove the fit finished: both commands that read a fit check all three are there
-    (`_unfinished_fit`). The report names the constraint set the draws were reconciled against, and
-    both compare it with the run's own first (`_stale_fit`).
+    itself prove the fit finished: both commands that read a fit check all three are there, the
+    manifest parses, and its digests match the other two (`_unfinished_fit`). The report names the
+    constraint set the draws were reconciled against, and both compare it with the run's own first
+    (`_stale_fit`).
     """
     import json
     import shutil
@@ -521,14 +538,22 @@ def _stale_fit(run: Path) -> dict[str, str | None] | None:
 
     The fit's hash is `posterior/diagnostics.json`'s. Every fit writes that report first, gate
     passed or not, into the `posterior/` it emptied, so the report and the store come from one fit,
-    and reading it needs no netCDF reader. An absent report or key is `None`, which matches
-    nothing: an unrecorded fit is refused, never trusted.
+    and reading it needs no netCDF reader. A report that is absent, cannot be read, does not parse
+    to an object or lacks the key is `None`, which matches nothing: an unrecorded fit is refused,
+    never trusted, and never raised past the caller (Codex on #43), so `reconcile` still writes its
+    verdict. This runs first in `validate-state-model`, and in `reconcile` whenever a store exists,
+    so a report that cannot be read is refused here as stale. `_unfinished_fit` names the same
+    report `unreadable` only in a `reconcile` without a store.
     """
     import json
 
     def recorded(path: Path) -> str | None:
-        """The `constraint_set_hash` a JSON artifact records, or `None` without the file or key."""
-        return json.loads(path.read_text()).get("constraint_set_hash") if path.exists() else None
+        """The `constraint_set_hash` a JSON artifact records, or `None` when it records none."""
+        try:
+            document = json.loads(path.read_text())
+        except OSError, ValueError:
+            return None
+        return document.get("constraint_set_hash") if isinstance(document, dict) else None
 
     fit = recorded(run / "posterior" / "diagnostics.json")
     current = recorded(run / "schema_manifest.json")
@@ -537,28 +562,87 @@ def _stale_fit(run: Path) -> dict[str, str | None] | None:
     return {"fit_constraint_set_hash": fit, "constraint_set_hash": current}
 
 
-def _unfinished_fit(run: Path) -> list[str] | None:
-    """What a passing fit never wrote, run-relative, or `None` when no passing fit is unfinished.
+def _unfinished_fit(run: Path) -> dict[str, list[str]] | None:
+    """Why a passing fit's artifacts are not one finished fit, or `None` when they are.
 
     `fit-state-model` writes `posterior/diagnostics.json` first, gate passed or not, so a failure
-    keeps its evidence. A pass then writes the store, `posterior_summary.parquet` and
-    `state_model_manifest.json`. So a fit interrupted after its report leaves `"passed": true`
-    beside draws that were never written (Codex on #41). `validate-state-model` deleted the last
-    promotion record and only then failed to read the store, and `reconcile`, which keyed on the
-    store alone, read such a run as having no fit. Both call this after `_stale_fit` and refuse the
-    fit unread. All three artifacts are required, not only the one written last, so reordering
-    those writes cannot weaken the check. No report is no fit, and a failed report writes no store
-    by design: both are `None`.
+    keeps its evidence. A pass then writes the store, `posterior_summary.parquet` and, last,
+    `state_model_manifest.json`, which records the other two's digests. So a fit interrupted after
+    its report leaves `"passed": true` beside draws that were never written (Codex on #41).
+    `validate-state-model` deleted the last promotion record and only then failed to read the
+    store, and `reconcile`, which keyed on the store alone, read such a run as having no fit. Both
+    call this after `_stale_fit` and refuse the fit unread.
+
+    EXISTENCE IS NOT PROOF (Codex on #42): a manifest cut short by a full disk still exists. So the
+    manifest must parse, and each digest it records must match: `draws_sha256` the store's own, and
+    `posterior_summary_sha256` the summary file's. Each key maps to run-relative paths: `missing`,
+    `unreadable` and `mismatched`. The store's check is identity, not content. `store_digest` reads
+    the digest the store was written with and hashes no draw. HDF5 refuses to open a file shorter
+    than the end its superblock records, so a store cut short is `unreadable`. Both commands re-hash
+    its draws after this (`draws_sha256_matches`).
+
+    NO READ RAISES PAST THIS (Codex on #43). An artifact that exists but cannot be read is
+    `unreadable`: a permission or I/O error, or a directory in its place, raised `OSError` out of
+    both commands, and `reconcile` then wrote no verdict at all (§16.1). So is a report or manifest
+    that does not parse to an object, and a store that does not open. A report that cannot be read
+    is `unreadable`, never `None`, which would let a `reconcile` without a store pass beside it.
+    `_stale_fit` refuses the same report first wherever it runs. No report is no fit, and a failed
+    report writes no store by design: both are `None`.
     """
+    import hashlib
     import json
 
     from .models.interfaces import STORE_PATH
 
-    report = run / "posterior" / "diagnostics.json"
-    if not report.exists() or json.loads(report.read_text()).get("passed") is not True:
+    report_path = "posterior/diagnostics.json"
+    if not (run / report_path).exists():
         return None
-    artifacts = (STORE_PATH, "posterior_summary.parquet", "state_model_manifest.json")
-    return [artifact for artifact in artifacts if not (run / artifact).exists()] or None
+    try:
+        report = json.loads((run / report_path).read_text())
+    except OSError, ValueError:
+        report = None
+    if not isinstance(report, dict):
+        return {"unreadable": [report_path]}
+    if report.get("passed") is not True:
+        return None
+    summary, manifest = "posterior_summary.parquet", "state_model_manifest.json"
+    missing = [path for path in (STORE_PATH, summary, manifest) if not (run / path).exists()]
+    if missing:
+        return {"missing": missing}
+    try:
+        recorded = json.loads((run / manifest).read_text())
+        draws_sha256 = recorded["draws_sha256"]
+        summary_sha256 = recorded["posterior_summary_sha256"]
+    except OSError, ValueError, KeyError, TypeError:
+        return {"unreadable": [manifest]}
+    # Only a fit that exists gets this far, so a baseline-only run never loads xarray.
+    from .models.arviz_io import store_digest
+
+    found: dict[str, list[str]] = {}
+    try:
+        if store_digest(run / STORE_PATH) != draws_sha256:
+            found["mismatched"] = [STORE_PATH]
+    except OSError, KeyError:
+        found["unreadable"] = [STORE_PATH]
+    try:
+        if hashlib.sha256((run / summary).read_bytes()).hexdigest() != summary_sha256:
+            found.setdefault("mismatched", []).append(summary)
+    except OSError:
+        found.setdefault("unreadable", []).append(summary)
+    return found or None
+
+
+def _unfinished_reasons(unfinished: dict[str, list[str]]) -> str:
+    """`_unfinished_fit`'s findings as one clause, naming only the artifacts at fault.
+
+    A mismatch is the manifest's word against an artifact's, and the artifact is the one named:
+    `mismatched` says "its manifest", never the manifest's file, so every file a refusal names is
+    one to distrust.
+    """
+    labels = {"mismatched": "not what its manifest records"}
+    return "; ".join(
+        f"{labels.get(kind, kind)}: {', '.join(paths)}" for kind, paths in unfinished.items()
+    )
 
 
 @app.command("reconcile")
@@ -610,8 +694,8 @@ def reconcile_command(
     # in writing it cannot pass unseen. The key is OMITTED, never null, before a fit exists, so a
     # baseline-only run writes the keys it always wrote. A fit from another constraint set fails
     # unread: its draws hold to that set's bounds, so checking them would pass (`_stale_fit`). So
-    # does a passing fit that did not finish writing (`_unfinished_fit`): keyed on the store alone,
-    # a run whose store never landed read as having no fit at all.
+    # does a passing fit whose artifacts are not one finished fit (`_unfinished_fit`): keyed on the
+    # store alone, a run whose store never landed read as having no fit at all.
     from .models.interfaces import STORE_PATH
 
     state_model_passed = True
@@ -620,11 +704,10 @@ def reconcile_command(
     unfinished = _unfinished_fit(run) if stale is None else None
     if unfinished is not None:
         state_model_passed = False
-        payload["state_model"] = {"missing": unfinished, "passed": False}
+        payload["state_model"] = {**unfinished, "passed": False}
         typer.echo(
-            "state-total draws not checked: the fit's report records a pass, but it is missing "
-            f"{', '.join(unfinished)}, so `fit-state-model` did not finish. "
-            "Run `fit-state-model` first",
+            "state-total draws not checked: the fit's report records a pass, but its artifacts are "
+            f"not one finished fit ({_unfinished_reasons(unfinished)}). Run `fit-state-model` first",
             err=True,
         )
     elif stale is not None:
@@ -778,10 +861,11 @@ def validate_state_model_command(
     to Stage 4's. The comparand is this run's own `validate` output. The precondition is that
     output, plus `fit-state-model`'s `posterior/diagnostics.json` from this run's constraint set:
     a fit from another is refused before anything is deleted (`_stale_fit`), and so is a passing
-    fit that never finished writing its store, summary and manifest (`_unfinished_fit`). A
-    production fit that failed §11.14 is recorded as not beaten without running the harness. Otherwise the model is
-    scored through `run_pseudo_suppression`'s own loop (`StateModelProducer`), which is 27 fits on
-    D1. Its tables go to `state_model_validation/` and the verdict to `promotion_record.json`. Both
+    fit whose store, summary and manifest are not all there, or disagree with the digests the
+    manifest records (`_unfinished_fit`). A production fit that failed §11.14 is recorded as not
+    beaten without running the harness. Otherwise the model is scored through
+    `run_pseudo_suppression`'s own loop (`StateModelProducer`), which is 27 fits on D1. Its tables
+    go to `state_model_validation/` and the verdict to `promotion_record.json`. Both
     verdicts exit 0, because "deploy the simpler method" is an outcome and not an error.
     """
     import hashlib
@@ -825,9 +909,9 @@ def validate_state_model_command(
                 f"and reads its production gate. Run `{command}` first"
             )
     # Before the gate is read and before anything is deleted: a stale fit is neither scored nor
-    # written up as not beaten, a passing fit that did not finish is not scored, and the last
-    # record survives either refusal. Reading the store only after the deletion lost that record
-    # whenever the store had never been written (Codex on #41).
+    # written up as not beaten, a passing fit whose artifacts are not one finished fit is not
+    # scored, and the last record survives either refusal. Reading the store only after the
+    # deletion lost that record whenever the store had never been written (Codex on #41).
     stale = _stale_fit(run)
     if stale is not None:
         raise typer.BadParameter(
@@ -839,8 +923,8 @@ def validate_state_model_command(
     unfinished = _unfinished_fit(run)
     if unfinished is not None:
         raise typer.BadParameter(
-            f"{diagnostics} records a passing fit, but it is missing {', '.join(unfinished)}: "
-            "`fit-state-model` did not finish. Run `fit-state-model` first"
+            f"{diagnostics} records a passing fit, but its artifacts are not one finished fit "
+            f"({_unfinished_reasons(unfinished)}). Run `fit-state-model` first"
         )
     out = run / "state_model_validation"
     shutil.rmtree(out, ignore_errors=True)
