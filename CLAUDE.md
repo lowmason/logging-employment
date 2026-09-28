@@ -43,18 +43,25 @@ fit_state_model_command, validate_state_model_command}` — symbols, not line nu
 **`run-baselines` gates on TWO** as of plan 13 (R-S5P-3): `schema_manifest.json` *and*
 `deterministic_bounds.parquet`, so `solve-bounds` is a hard precondition rather than an advisory
 step in the documented order — every estimate is checked against its §9 interval (INV-002's
-per-cell half) instead of the check being skipped when its input is absent. `validate --estimators a,b` scores a subset in its own run dir. `--help` is the real
+per-cell half) instead of the check being skipped when its input is absent. Since `D-130` it also
+refuses bounds solved against another `constraint_set_hash`, through the precondition it shares
+with `fit-state-model` (`cli.py::_solved_bounds`), which reads the bounds once and hashes the bytes
+it parses. `validate --estimators a,b` scores a subset in its own run dir. `--help` is the real
 command list — four of §16.1's fifteen do not exist yet (`fit-size-model`, `disclosure-review`,
 `publish`, `run-all`). `validate-state-model` is not one of the fifteen: plan 16 added it so that
 `validate` stays the §13.10 comparand's command, byte for byte. `fit-state-model` gates on
 `schema_manifest.json` and `deterministic_bounds.parquet`, and refuses bounds solved against another
-`constraint_set_hash`; `validate-state-model` on the three `validation_*` tables, the
+`constraint_set_hash` (`_solved_bounds` again; its report and manifest record the bounds file's
+digest, `D-136`); `validate-state-model` on the three `validation_*` tables, the
 `validation_manifest.json` that records their digests, and `posterior/diagnostics.json`, and it
 refuses tables whose digests that manifest does not record (`cli.py::_read_comparand`). The two
 commands that read a fit, `reconcile` and
 `validate-state-model`, refuse one whose `diagnostics.json` names another `constraint_set_hash`
 (`cli.py::_stale_fit`): a fit outlives its constraint set whenever `build-constraints` re-runs
-without a re-fit, and its draws would re-verify clean against their own bounds. They also refuse,
+without a re-fit, and its draws would re-verify clean against their own bounds. The sets agreeing,
+they refuse one whose `deterministic_bounds_sha256` is not the digest of the file on disk, or that
+records none (`D-136`): `solve-bounds` re-run under the same set rewrites the file and keeps the
+hash. They also refuse,
 unread, a fit whose report records a pass while its store, `posterior_summary.parquet` or
 `state_model_manifest.json` is missing or cannot be read or parsed, or a digest the manifest records
 does not match (`cli.py::_unfinished_fit`): the report is written first, so an interrupted fit
@@ -230,9 +237,10 @@ in `runs/<run_id>/` beside one JSON manifest per command.
 - **A run directory can be stale w.r.t. your code.** `run_id` ignores source, so editing an
   estimator and re-running overwrites the same `runs/<id>/`. The one cross-stage check that does
   fire is `constraint_set_hash` (see `constraints/CLAUDE.md`). `solve-bounds` checks the constraint
-  tables against it, `fit-state-model` checks the bounds, and `reconcile` and
-  `validate-state-model` check the fit (plan 16); `run-baselines` reads the bounds without
-  comparing.
+  tables against it, `run-baselines` and `fit-state-model` check the bounds
+  (`cli.py::_solved_bounds`, the former since `D-130`), and `reconcile` and `validate-state-model`
+  check the fit, by constraint set (plan 16) and, the sets agreeing, by the bounds file's digest
+  (`D-136`).
 - **CBP responses are not byte-reproducible** — set-identical rows in a different order, so each
   re-fetch stores another object for the same year. `build.snapshot_paths` raises
   `AmbiguousSnapshotError` (`build.py::snapshot_paths`) rather than stacking two snapshots of one key; pass the

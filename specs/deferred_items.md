@@ -2679,7 +2679,7 @@ this protocol, and `D-131` and `D-132` come from the promotion record. The measu
       Size: plan. Done when: two production seeds on the locked versions measure every imputed cell's
       mean spread, and either a draw count that brings NV's and RI's within the medians' is set in
       `config.yaml` or a ruling accepts the spread, before Stage 7's §13.10 re-run scores means again.
-- [ ] `D-130` **`run-baselines` reads `deterministic_bounds.parquet` without checking which constraint
+- [x] `D-130` **`run-baselines` reads `deterministic_bounds.parquet` without checking which constraint
       set it was solved against.** `run_id` does not cover code, so `build-constraints` can re-run under
       the same id and leave the previous bounds beside a new `schema_manifest.json`. Plan 16 made
       `cli.py::fit_state_model_command` refuse that, comparing the bounds' `constraint_set_hash` column
@@ -2690,6 +2690,12 @@ this protocol, and `D-131` and `D-132` come from the promotion record. The measu
       Size: quick-fix. Done when: `run_baselines_command` refuses, before it writes, bounds whose
       `constraint_set_hash` is not the manifest's, as `fit_state_model_command` does, and a test re-runs
       `build-constraints` on a changed system under the same id and sees `run-baselines` refuse.
+      → done 2026-09-28 (/deferred quick fix): `run-baselines` and `fit-state-model` share one
+      precondition, `cli.py::_solved_bounds`, which reads the bounds once and refuses, before either
+      writes, bounds whose `constraint_set_hash` is not `schema_manifest.json`'s. The test re-runs
+      `build-constraints` under the same id with the integrality rows gone and sees `run-baselines`
+      refuse with the last results and their manifest untouched
+      (`tests/integration/test_baseline_cli.py::test_run_baselines_refuses_bounds_solved_against_another_constraint_set`).
 - [ ] `D-131` **The state-total model's 90% intervals under-cover hidden cells, so §13.10's coverage
       gate failed.** `runs/dd7337e89047/promotion_record.json` (plan 16, 2026-09-27), pooled over the
       nine scored regimes: 940 of 1,253, 0.750, against 0.90 ± 0.05. The binomial tail test at α = 0.001
@@ -2783,7 +2789,7 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       Size: quick-fix. Done when: `reconcile` reads the results once, hashing and parsing the same
       bytes, and refuses results that its manifest or the run's constraint set does not vouch for, with
       tests for a rewritten file and for a changed constraint set.
-- [ ] `D-136` **A fit is tied to its bounds only by `constraint_set_hash`, so bounds re-solved under
+- [x] `D-136` **A fit is tied to its bounds only by `constraint_set_hash`, so bounds re-solved under
       the same constraint set leave it looking current.** `run_id` does not cover code, so `solve-bounds`
       can re-run under the same id after a change to `constraints/bounds.py` and rewrite
       `deterministic_bounds.parquet` without changing the constraint set. The fit's report records only
@@ -2794,6 +2800,16 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       Size: quick-fix. Done when: `fit-state-model` records the digest of the bounds it reconciled
       into, `_stale_fit` refuses a fit whose recorded digest is not the current file's, and a test
       rewrites the bounds under an unchanged constraint set and sees both commands refuse.
+      → done 2026-09-28 (/deferred quick fix): the report and `state_model_manifest.json` record
+      `deterministic_bounds_sha256`, the digest of the bytes `cli.py::_solved_bounds` parsed, and
+      `cli.py::_stale_fit` refuses, once the constraint sets agree, a fit whose recorded digest is
+      not the file's or that records none. Tests rewrite the bounds under an unchanged constraint set
+      and see `reconcile` record the refusal and `validate-state-model` refuse before it deletes
+      anything (`tests/integration/test_cli_state_model.py`,
+      `tests/integration/test_cli_validate_state_model.py`). A fit from before this change records
+      no digest and is refused as unrecorded, so `runs/dd7337e89047`'s production fit needs
+      `fit-state-model` again before `reconcile` or `validate-state-model` reads it; its promotion
+      record stands.
 - [ ] `D-137` **`reconcile_manifest.json`'s `state_model` verdict does not name the fit it checked, and
       a re-fit leaves it standing.** `fit-state-model` deletes `posterior/`, `posterior_summary.parquet`
       and `state_model_manifest.json` but not `reconcile_manifest.json`, and `reconcile` records

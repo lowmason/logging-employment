@@ -111,14 +111,67 @@ def make_staged_repo(tmp_path_factory: pytest.TempPathFactory) -> Callable[..., 
 
 
 @pytest.fixture()
-def plant_finished_fit() -> Callable[..., None]:
+def fit_report() -> Callable[..., dict[str, object]]:
+    """A `posterior/diagnostics.json` as `fit-state-model` writes it, for a run built here.
+
+    It names the run's constraint set from `schema_manifest.json` and, since `D-136`, the digest of
+    `deterministic_bounds.parquet`, the bounds the draws were reconciled into, when the run has that
+    file. `cli.py::_stale_fit` refuses a report that names another set or another digest, or none,
+    so a planted report has to carry both for a test to reach the check it is about. `passed` and
+    `constraint_set_hash` override the gate and the set, for a failed fit or a stale one.
+    """
+
+    def _report(
+        run: Path, *, passed: bool = True, constraint_set_hash: str | None = None
+    ) -> dict[str, object]:
+        report: dict[str, object] = {
+            "passed": passed,
+            "failures": [] if passed else ["parameter_rhat_max"],
+            "constraint_set_hash": constraint_set_hash
+            or json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"],
+        }
+        bounds = run / "deterministic_bounds.parquet"
+        if bounds.exists():
+            report["deterministic_bounds_sha256"] = hashlib.sha256(bounds.read_bytes()).hexdigest()
+        return report
+
+    return _report
+
+
+@pytest.fixture()
+def rewrite_bounds() -> Callable[[Path], None]:
+    """Re-solve a run's bounds under its constraint set, as `solve-bounds` does after a code change.
+
+    One cell's `selected_upper` moves and every `constraint_set_hash` stays, so the file's digest
+    changes while `fit-state-model`'s hash check still passes. That is the rewrite `D-136` is
+    about: nothing but the digest the fit recorded can tell the new file from the one its draws
+    were reconciled into.
+    """
+
+    def _rewrite(run: Path) -> None:
+        path = run / "deterministic_bounds.parquet"
+        before = pl.read_parquet(path)
+        after = before.with_columns(
+            pl.when(pl.int_range(pl.len()) == 0)
+            .then(pl.lit(123456.0))
+            .otherwise(pl.col("selected_upper"))
+            .alias("selected_upper")
+        )
+        assert not after.equals(before)
+        after.write_parquet(path)
+
+    return _rewrite
+
+
+@pytest.fixture()
+def plant_finished_fit(fit_report: Callable[..., dict[str, object]]) -> Callable[..., None]:
     """Plant what a passing `fit-state-model` leaves in a run, whole or with one artifact damaged.
 
     Each artifact is the least that `cli.py::_unfinished_fit` accepts, not a real fit: a passing
-    report naming `constraint_set_hash`, a store holding only its `draws_sha256` root attribute, a
-    few bytes of summary, and a manifest recording both digests. So a command that got past the
-    check would crash reading the store's draws, not pass, and a test that damages one artifact
-    isolates the refusal to it. `damage` is one of:
+    report naming `constraint_set_hash` and the bounds' digest (`fit_report`), a store holding only
+    its `draws_sha256` root attribute, a few bytes of summary, and a manifest recording both
+    digests. So a command that got past the check would crash reading the store's draws, not pass,
+    and a test that damages one artifact isolates the refusal to it. `damage` is one of:
 
     - `manifest_cut_short`: the manifest's first half, as a full disk left it before `os.replace`;
     - `manifest_is_a_directory`: a directory where the manifest was. It exists, and reading it
@@ -142,7 +195,7 @@ def plant_finished_fit() -> Callable[..., None]:
             xr.DataTree.from_dict({"/": root}).to_netcdf(run / STORE_PATH, engine=STORE_ENGINE)
 
         (run / "posterior").mkdir(parents=True, exist_ok=True)
-        report = {"passed": True, "failures": [], "constraint_set_hash": constraint_set_hash}
+        report = fit_report(run, constraint_set_hash=constraint_set_hash)
         (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
         store("d" * 64)
         summary = run / "posterior_summary.parquet"

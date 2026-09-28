@@ -3,13 +3,29 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import polars as pl
+import pytest
 from typer.testing import CliRunner
 
 from logging_employment.cli import app
+from logging_employment.constraints import rows as constraint_rows
 
 runner = CliRunner()
+
+
+def _rebuild_on_a_changed_system(config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`build-constraints` again under the same run id, on a system a code change altered.
+
+    The integrality rows are gone, as a change to `constraints/rows.py` could leave them. `run_id`
+    covers config and inputs, not code, so the new `schema_manifest.json` lands beside the bounds
+    and results the old constraint set produced.
+    """
+    monkeypatch.setattr(constraint_rows, "integrality_rows", lambda cells_frame: [])
+    result = runner.invoke(app, ["build-constraints", "--config", str(config)])
+    monkeypatch.undo()
+    assert result.exit_code == 0, result.output
 
 
 def test_run_baselines_writes_results_and_a_sibling_manifest(staged_repo) -> None:
@@ -172,3 +188,29 @@ def test_the_production_path_scales_an_estimate_into_a_finite_upper_below_it(sta
     )
     assert rerun["estimate"].item() <= row["estimate"] / 2.0 < row["estimate"]
     assert rerun["estimate_integer"].item() <= row["estimate"] / 2.0
+
+
+def test_run_baselines_refuses_bounds_solved_against_another_constraint_set(
+    staged_repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-130`. `fit-state-model` refused bounds whose `constraint_set_hash` was not the manifest's;
+    `run-baselines` compared nothing, checked every estimate against the old bounds and stamped
+    `baseline_results` with the manifest's new hash. It refuses the same way now, before it writes,
+    so the last results and their manifest survive the refusal."""
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    results = run / "baseline_results" / "baseline_results.parquet"
+    manifest = run / "baseline_manifest.json"
+    before = (results.read_bytes(), manifest.read_bytes())
+    _rebuild_on_a_changed_system(staged_repo.config_path, monkeypatch)
+    # The control: the rebuild did move the constraint set out from under the solved bounds.
+    schema = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    solved = set(pl.read_parquet(run / "deterministic_bounds.parquet")["constraint_set_hash"])
+    assert solved != {schema}
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code != 0
+    # Short tokens only, as `test_run_baselines_refuses_a_run_with_no_solved_bounds` explains.
+    assert "solve-bounds" in result.output
+    assert "build-constraints" in result.output
+    assert (results.read_bytes(), manifest.read_bytes()) == before
