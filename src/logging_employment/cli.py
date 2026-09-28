@@ -1032,8 +1032,9 @@ def _settle_state_model_validation(run: Path) -> None:
 
     ONLY UNDER THE RUN'S LOCK (`_run_lock`, `D-138`). Leftovers look the same whether their
     publish was killed or is still running, so every guarantee here holds only while no other
-    publish is running on the run. Beside one, a settle undoes its staging under it. #44's review
-    measured both interleavings in scratch. During the renames, the publish fails at its commit,
+    publish is running on the run. Beside one, a settle undoes its staging under it. Both
+    interleavings were measured in scratch against these functions, the first by #44's pre-push
+    review and the second after it. During the renames, the publish fails at its commit,
     its handler's settle deletes the last tables as a committed tail, and the last record is left
     beside the new tables with nothing for a later settle to find. During the staging, the settle
     deletes the staging directory as an unfinished write, `build.write_parquet_deterministic`
@@ -1143,8 +1144,9 @@ def _run_lock(run: Path) -> Iterator[None]:
     under it (`_settle_state_model_validation`). An `flock` rather than a lock file's existence,
     because the kernel releases it when its holder exits, killed or not, so no crash leaves a run
     locked and nothing has to guess whether a lock is stale. The file is kept, empty, after the
-    lock is released: deleting it would let a third invocation lock a new file while a second
-    still waits on the old one. A run directory that does not exist holds nothing to settle or
+    lock is released. Deleting it would let an invocation that opened the old file before the
+    deletion lock it once released, while another creates and locks a new file at the same path:
+    two holders at once. A run directory that does not exist holds nothing to settle or
     publish, and the command refuses it at its first precondition, so it is not created to be
     locked.
     """
