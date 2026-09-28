@@ -111,9 +111,11 @@ before it scores anything. Both first compare `diagnostics.json`'s `constraint_s
 `schema_manifest.json`'s and refuse a fit from another constraint set unread
 (`cli.py::_stale_fit`): the draws hold to that set's bounds, so re-checking them would pass. Both
 also refuse, unread, a fit whose report records a pass while the store, the summary or
-`state_model_manifest.json` is missing (`cli.py::_unfinished_fit`). The report is written before
-the gate is enforced so that a failure keeps its evidence, which means it does not prove the fit
-finished.
+`state_model_manifest.json` is missing, the manifest does not parse, or a digest it records does
+not match (`cli.py::_unfinished_fit`). The report is written before the gate is enforced so that a
+failure keeps its evidence, which means it does not prove the fit finished. The store's check there
+is identity, not content: the manifest's `draws_sha256` against the one the store was written with.
+HDF5 will not open a store cut short, and both commands re-hash the draws themselves afterwards.
 `fit-state-model` keeps the last fit when it refuses stale bounds, and `build-constraints` can
 re-run without a re-fit, so such a fit is a normal state of a run directory, not a corruption.
 

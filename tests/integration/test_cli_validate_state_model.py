@@ -40,6 +40,14 @@ INTERRUPTIONS = {
     "before_the_manifest": (STORE_PATH, "posterior_summary.parquet"),
     "store_deleted_later": ("posterior_summary.parquet", "state_model_manifest.json"),
 }
+# Every artifact present, one damaged (`conftest.py::plant_finished_fit`), and what
+# `cli.py::_unfinished_fit` finds.
+DAMAGE = {
+    "manifest_cut_short": {"unreadable": ["state_model_manifest.json"]},
+    "store_cut_short": {"unreadable": [STORE_PATH]},
+    "store_from_another_fit": {"mismatched": [STORE_PATH]},
+    "summary_rewritten": {"mismatched": ["posterior_summary.parquet"]},
+}
 
 
 def _invoke(command: str, config: Path):
@@ -220,6 +228,39 @@ def test_an_unfinished_fit_is_refused_before_anything_is_deleted(make_staged_rep
     assert "fit-state-model" in result.output
     for artifact in FIT_ARTIFACTS:
         assert (Path(artifact).name in result.output) is (artifact not in written), artifact
+    assert all(path.read_text() == "from an earlier validation" for path in earlier)
+
+
+@pytest.mark.parametrize(("damage", "found"), list(DAMAGE.items()), ids=list(DAMAGE))
+def test_a_fit_its_manifest_does_not_vouch_for_is_refused_before_anything_is_deleted(
+    make_staged_repo, plant_finished_fit, damage, found
+) -> None:
+    """Codex on #42. An artifact's existence does not prove the fit finished writing it: a full
+    disk left a manifest cut short, it still existed, and the command went on to delete the last
+    record and score the store. The manifest must parse and its digests must match the store and
+    the summary, or the command refuses first, naming only the artifact at fault. The planted store
+    holds only its digest, so reading its draws would crash, not refuse."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    for table in COMPARAND_TABLES:
+        (run / f"{table}.parquet").write_text("a comparand")
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    plant_finished_fit(run, current, damage=damage)
+    earlier = (
+        run / "promotion_record.json",
+        run / "state_model_validation" / "validation_manifest.json",
+    )
+    for path in earlier:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("from an earlier validation")
+    result = _invoke("validate-state-model", repo.config_path)
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit), result.exception
+    # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps the message.
+    assert "fit-state-model" in result.output
+    named = {artifact for artifacts in found.values() for artifact in artifacts}
+    for artifact in FIT_ARTIFACTS:
+        assert (Path(artifact).name in result.output) is (artifact in named), artifact
     assert all(path.read_text() == "from an earlier validation" for path in earlier)
 
 
