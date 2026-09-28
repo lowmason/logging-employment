@@ -420,12 +420,15 @@ class StateModelDiagnostics(_Strict):
 
     THE THRESHOLDS ARE FINITE AT LOAD. An infinite `max_rhat` would pass every fit's R-hat check,
     and a NaN one would fail every fit, but only after it had sampled. `min_ppc_coverage_90` is a
-    share, so it lies in [0, 1].
+    share, so it lies in [0, 1]. The integers are bounded below for the same two reasons (Codex on
+    #41). The ESS floor is `min_ess_per_chain * chains`, so a value of 0 or less would pass every
+    fit's ESS check however badly it mixed, and a negative `max_divergences` would fail every fit,
+    but only after sampling.
     """
 
     max_rhat: FiniteFloat = 1.01
-    min_ess_per_chain: int = 100
-    max_divergences: int = 0
+    min_ess_per_chain: int = Field(default=100, ge=1)
+    max_divergences: int = Field(default=0, ge=0)
     min_ppc_coverage_90: float = Field(default=0.85, ge=0.0, le=1.0)
 
 

@@ -124,6 +124,39 @@ def test_no_float_in_the_model_block_may_be_infinite_or_nan() -> None:
             ModelConfig.model_validate({"suppressed_variance_multipliers": multipliers})
 
 
+def test_the_integer_gate_thresholds_cannot_fail_open() -> None:
+    """Codex on #41. The ESS floor is `min_ess_per_chain * chains` (`models/diagnostics.py`), so a
+    floor of 0 or below passes every fit's ESS check however badly it mixed. A negative
+    `max_divergences` fails every fit, but only after it has sampled. Both are refused at load,
+    naming the field (§18.3), and the loosest values that still gate something load."""
+    for name, value in (
+        ("min_ess_per_chain", 0),
+        ("min_ess_per_chain", -100),
+        ("max_divergences", -1),
+    ):
+        with pytest.raises(ValidationError, match=name):
+            StateModelDiagnostics.model_validate({name: value})
+    StateModelDiagnostics.model_validate({"min_ess_per_chain": 1, "max_divergences": 0})
+
+
+def test_no_integer_in_the_model_block_accepts_a_negative_but_the_seed() -> None:
+    """The integer counterpart of the float test above, read off the same three models, so an
+    integer added later without a floor fails here, and the count fails first. The seed names a
+    random stream and gates nothing, so any integer is a seed."""
+    ints = [
+        (model, name)
+        for model in (ModelConfig, StateModelPriors, StateModelDiagnostics)
+        for name, field in model.model_fields.items()
+        if field.annotation is int
+    ]
+    assert len(ints) == 6
+    for model, name in ints:
+        if name == "seed":
+            continue
+        with pytest.raises(ValidationError, match=name):
+            model.model_validate({name: -1})
+
+
 def test_a_misspelled_model_key_is_refused() -> None:
     with pytest.raises(ValidationError, match="extra_forbidden|Extra inputs"):
         ModelConfig.model_validate({"chain": 4})
