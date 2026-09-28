@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .errors import StoredObjectMismatchError
+from .errors import SecretInPayloadError, StoredObjectMismatchError
 from .ingest.base import FetchedBytes
 from .runs import replace_whole
 
@@ -25,10 +25,15 @@ class StoredObject:
 
 
 def assert_no_secret(payload: str, secrets: Sequence[str | None]) -> None:
-    """Raise ValueError if any non-empty secret value appears in the payload (§7.2, D3)."""
+    """Raise `SecretInPayloadError` if any non-empty secret value appears in the payload (§7.2, D3).
+
+    The message names no value, because the value is the secret (`D-140`).
+    """
     for secret in secrets:
         if secret and secret in payload:
-            raise ValueError("a secret value reached a manifest payload; refusing to write it")
+            raise SecretInPayloadError(
+                "a secret value reached a manifest payload; refusing to write it"
+            )
 
 
 class RawStore:

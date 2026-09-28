@@ -46,10 +46,7 @@ KEEP: dict[str, str] = {
 # Sites the sweep this test landed with converts, one task at a time. Each task removes its entry
 # first, sees this test name the site as unclassified, and then converts it. Empty when the sweep
 # is complete, and deleted then.
-PENDING: dict[str, str] = {
-    "reconcile/scaling.py::Bounds.__post_init__": "Task 5",
-    "store.py::assert_no_secret": "Task 5",
-}
+PENDING: dict[str, str] = {}
 
 
 def _bare_value_error_sites() -> set[str]:

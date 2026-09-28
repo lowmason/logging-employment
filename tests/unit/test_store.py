@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from logging_employment.errors import StoredObjectMismatchError
+from logging_employment.errors import SecretInPayloadError, StoredObjectMismatchError
 from logging_employment.ingest.base import FetchedBytes
 from logging_employment.store import RawStore, assert_no_secret
 
@@ -49,8 +49,10 @@ def test_a_stored_object_is_not_rewritten(tmp_path: Path) -> None:
 
 
 def test_assert_no_secret_raises_on_a_leaked_value() -> None:
-    with pytest.raises(ValueError, match="secret"):
+    """`SecretInPayloadError`, and the message carries no value: the value is the secret."""
+    with pytest.raises(SecretInPayloadError, match="secret") as caught:
         assert_no_secret("url=...&key=abc123", ["abc123"])
+    assert "abc123" not in str(caught.value)
 
 
 def test_assert_no_secret_ignores_empty_secrets() -> None:

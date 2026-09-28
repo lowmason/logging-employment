@@ -183,8 +183,9 @@ in `runs/<run_id>/` beside one JSON manifest per command.
   reason it is a caller's mistake, and refuses a new one until it is classified. Some classes and
   guards are *deliberately unraised/uncalled* and say so (`NoHarvestFactorError`, both guards in
   `harmonize/concepts.py`): later stages own them.
-- **Secrets never reach an artifact** (D3, §7.2): `store.assert_no_secret` refuses a
-  snapshot row containing one of `config.SECRET_ENV_VARS`, `fetching._without_credentials` strips
+- **Secrets never reach an artifact** (D3, §7.2): `store.assert_no_secret` refuses, with
+  `SecretInPayloadError`, a snapshot row containing one of `config.SECRET_ENV_VARS`,
+  `fetching._without_credentials` strips
   the `key` param before recording, and `resolved_dict` keeps only the env var's *name*.
 - **`cell_id` = `kind|state_fips|reference_month|ownership_code|industry_code|naics_vintage|
   size_class`** (`constraints/cells.py::cell_id`); totals use `state_fips="US"`, `size_class="ALL"`.

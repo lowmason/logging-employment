@@ -44,8 +44,9 @@ class Bounds:
         which settles an inverted pair in the cap's favour and returns a value below the lower
         bound the caller declared. §12.3's feasibility predicate reads SUMS, so an inversion passes
         it whenever the sums stay feasible. `integerize` already refuses this shape by name; this is
-        the same refusal one layer earlier. Equality is not an inversion: a cell pinned to a single
-        value is legitimate, and the strict `>` admits it.
+        the same refusal one layer earlier, under the same name, `InfeasibleResidualError`
+        (`D-140`). Equality is not an inversion: a cell pinned to a single value is legitimate, and
+        the strict `>` admits it.
         """
         inverted = sorted(
             cell
@@ -54,7 +55,7 @@ class Bounds:
         )
         if inverted:
             cell = inverted[0]
-            raise ValueError(
+            raise InfeasibleResidualError(
                 f"cell {cell!r} has lower bound {self.lower[cell]} above its upper bound "
                 f"{self.upper[cell]} ({len(inverted)} inverted cell(s) in all); clamping to the cap "
                 "would silently return a value below the lower bound the caller declared"
