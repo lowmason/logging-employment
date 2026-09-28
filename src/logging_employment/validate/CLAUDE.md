@@ -246,7 +246,11 @@ A failure or a kill before that rename leaves the last record and its tables, on
 `promotion.evaluate_promotion` is the ONLY reader of `config.promotion`'s four keys, and
 `tests/unit/test_config_validation_block.py::test_the_promotion_keys_are_read_only_by_the_promotion_record`
 reddens on a second reader. It compares the model's `state_model_validation/` tables against the
-SAME run's `validate` tables, whose digests the record carries. The readings §13.10 leaves open are
+SAME run's `validate` tables, whose digests the record carries. `cli.py::_read_comparand` reads
+each of those tables once, hashing and parsing the same bytes, and the command refuses a comparand
+whose digests are not the `output_hashes` of `validate`'s own `validation_manifest.json`, or that
+cannot be read (#44), so the record never names a comparand no `validate` wrote.
+The readings §13.10 leaves open are
 plan 16's Decision 4, and each is written into the record beside its evidence:
 
 - **Coverage is pooled** over every regime and seed, and per-regime values are reported but gate

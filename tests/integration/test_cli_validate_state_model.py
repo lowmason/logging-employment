@@ -17,7 +17,7 @@ import polars as pl
 import pytest
 from typer.testing import CliRunner
 
-from logging_employment.cli import app
+from logging_employment.cli import _read_comparand, app
 from logging_employment.models.interfaces import STORE_PATH
 
 SMALL_SAMPLER = {"chains": 2, "warmup": 60, "draws": 60}
@@ -50,6 +50,17 @@ DAMAGE = {
     "summary_rewritten": {"mismatched": ["posterior_summary.parquet"]},
     "summary_is_a_directory": {"unreadable": ["posterior_summary.parquet"]},
 }
+# The comparand `validate` wrote, one part damaged after (`_plant_comparand`), and what
+# `cli.py::_read_comparand` finds.
+COMPARAND_DAMAGE = {
+    "manifest_cut_short": {"unreadable": ["validation_manifest.json"]},
+    "manifest_is_a_directory": {"unreadable": ["validation_manifest.json"]},
+    "manifest_names_no_scoreboard": {"unreadable": ["validation_manifest.json"]},
+    "scores_rewritten": {"mismatched": ["validation_scores.parquet"]},
+    "metrics_is_a_directory": {"unreadable": ["validation_metrics.parquet"]},
+    "scoreboard_not_parquet": {"unreadable": ["validation_scoreboard.parquet"]},
+}
+COMPARAND_FILES = (*(f"{table}.parquet" for table in COMPARAND_TABLES), "validation_manifest.json")
 # What a `validate-state-model` that failed or was killed partway can leave beside the outputs.
 LEFTOVERS = (
     "state_model_validation.partial",
@@ -64,6 +75,46 @@ def _invoke(command: str, config: Path):
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _plant_comparand(run: Path, damage: str | None = None) -> None:
+    """This run's `validate` output: three tables and the manifest recording their digests.
+
+    Each table is a one-row Parquet file, not `validate`'s schema, because the command parses what
+    it hashes and compares nothing on the failed-gate path these tests take. `damage` is a key of
+    `COMPARAND_DAMAGE`, applied after the manifest is written: a manifest cut short or a directory
+    (which fails to read even as root), one that records no digest for a table, a table rewritten
+    since, a table that is a directory, and one whose digest matches but which is not Parquet.
+    """
+    for table in COMPARAND_TABLES:
+        path = run / f"{table}.parquet"
+        if damage == "scoreboard_not_parquet" and table == "validation_scoreboard":
+            path.write_text("a comparand")
+        else:
+            pl.DataFrame({"cell_id": [table]}).write_parquet(path)
+    hashes = {table: _sha256(run / f"{table}.parquet") for table in COMPARAND_TABLES}
+    if damage == "manifest_names_no_scoreboard":
+        del hashes["validation_scoreboard"]
+    manifest = run / "validation_manifest.json"
+    manifest.write_text(json.dumps({"estimators": ["a_baseline"], "output_hashes": hashes}))
+    if damage == "manifest_cut_short":
+        manifest.write_bytes(manifest.read_bytes()[: manifest.stat().st_size // 2])
+    elif damage == "manifest_is_a_directory":
+        manifest.unlink()
+        manifest.mkdir()
+    elif damage == "scores_rewritten":
+        pl.DataFrame({"cell_id": ["another"]}).write_parquet(run / "validation_scores.parquet")
+    elif damage == "metrics_is_a_directory":
+        (run / "validation_metrics.parquet").unlink()
+        (run / "validation_metrics.parquet").mkdir()
+    elif damage not in {None, "scoreboard_not_parquet", "manifest_names_no_scoreboard"}:
+        raise ValueError(f"no such damage: {damage!r}")
+
+
+def _plant_unread_comparand(run: Path) -> None:
+    """The comparand and its manifest as text, for a refusal that must come before either is read."""
+    for name in COMPARAND_FILES:
+        (run / name).write_text("a comparand")
 
 
 @pytest.fixture(scope="module")
@@ -181,8 +232,7 @@ def test_a_fit_from_another_constraint_set_is_refused_before_anything_is_deleted
     last record is deleted. The comparand is planted as text, since a refusal never reads it."""
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
-    for table in COMPARAND_TABLES:
-        (run / f"{table}.parquet").write_text("a comparand")
+    _plant_unread_comparand(run)
     report = {
         "passed": passed,
         "failures": [] if passed else ["parameter_rhat_max"],
@@ -214,8 +264,7 @@ def test_an_unfinished_fit_is_refused_before_anything_is_deleted(make_staged_rep
     text, since a refusal reads neither."""
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
-    for table in COMPARAND_TABLES:
-        (run / f"{table}.parquet").write_text("a comparand")
+    _plant_unread_comparand(run)
     current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     (run / "posterior").mkdir()
     report = {"passed": True, "failures": [], "constraint_set_hash": current}
@@ -250,8 +299,7 @@ def test_a_fit_its_manifest_does_not_vouch_for_is_refused_before_anything_is_del
     holds only its digest, so reading its draws would crash, not refuse."""
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
-    for table in COMPARAND_TABLES:
-        (run / f"{table}.parquet").write_text("a comparand")
+    _plant_unread_comparand(run)
     current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     plant_finished_fit(run, current, damage=damage)
     earlier = (
@@ -281,8 +329,7 @@ def test_a_report_that_cannot_be_read_is_refused_before_anything_is_deleted(
     permission or I/O error would, and does so even as root."""
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
-    for table in COMPARAND_TABLES:
-        (run / f"{table}.parquet").write_text("a comparand")
+    _plant_unread_comparand(run)
     (run / "posterior" / "diagnostics.json").mkdir(parents=True)
     earlier = (
         run / "promotion_record.json",
@@ -303,11 +350,11 @@ def test_a_report_that_cannot_be_read_is_refused_before_anything_is_deleted(
 def test_a_failed_fits_report_alone_is_written_up_as_not_beaten(make_staged_repo) -> None:
     """A failed gate writes its report and nothing else, by design, so the report alone is not an
     unfinished fit: the command records the model as not beaten without a store (Decision 9). The
-    last validation's tables are replaced by none, never left beside a not-beaten record."""
+    last validation's tables are replaced by none, never left beside a not-beaten record. The record
+    names the comparand by the digests of the tables `validate` wrote."""
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
-    for table in COMPARAND_TABLES:
-        (run / f"{table}.parquet").write_text("a comparand")
+    _plant_comparand(run)
     current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     (run / "posterior").mkdir()
     report = {"passed": False, "failures": ["parameter_rhat_max"], "constraint_set_hash": current}
@@ -319,19 +366,44 @@ def test_a_failed_fits_report_alone_is_written_up_as_not_beaten(make_staged_repo
     record = json.loads((run / "promotion_record.json").read_text())
     assert record["verdict"] == "not_beaten"
     assert record["gates"]["convergence"]["production_failures"] == ["parameter_rhat_max"]
+    recorded = json.loads((run / "validation_manifest.json").read_text())["output_hashes"]
+    assert record["comparand"] == {
+        "run_id": record["run_id"],
+        **{f"{table}_sha256": recorded[table] for table in COMPARAND_TABLES},
+    }
     assert list((run / "state_model_validation").iterdir()) == []
     assert not any((run / leftover).exists() for leftover in LEFTOVERS)
 
 
-def test_an_unreadable_comparand_fails_before_anything_is_deleted(make_staged_repo) -> None:
-    """Every read now comes before the last validation is touched. The comparand's digests were
-    read after the deletion, so a comparand that could not be read cost the last record and its
-    tables. Each comparand table is a directory: it exists, so the precondition passes, and
-    reading it fails. The report records a failed gate, the path that scores nothing."""
+def test_the_command_requires_validates_manifest(make_staged_repo) -> None:
+    """The comparand is vouched for by `validate`'s manifest, so a run with the three tables and no
+    manifest has no comparand the command can trust, and is refused as one without the tables is."""
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
-    for table in COMPARAND_TABLES:
-        (run / f"{table}.parquet").mkdir()
+    _plant_comparand(run)
+    (run / "validation_manifest.json").unlink()
+    result = _invoke("validate-state-model", repo.config_path)
+    assert isinstance(result.exception, SystemExit), result.exception
+    # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps the message.
+    assert "validation_manifest.json" in result.output
+    assert "missing" in result.output
+
+
+@pytest.mark.parametrize(
+    ("damage", "found"), list(COMPARAND_DAMAGE.items()), ids=list(COMPARAND_DAMAGE)
+)
+def test_a_comparand_validate_did_not_write_is_refused_before_anything_is_deleted(
+    make_staged_repo, damage, found
+) -> None:
+    """#44, found beside Codex's P1. The record names the comparand by digest, and the command
+    hashed whatever tables it found, parsed them again from their paths later, and raised on one
+    that could not be read. Now each table is read once, before anything moves, and must be what
+    `validate` recorded writing in `validation_manifest.json`, or the command refuses, naming only
+    the files at fault.
+    The report records a failed gate, the path that scores nothing."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    _plant_comparand(run, damage=damage)
     current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     (run / "posterior").mkdir()
     report = {"passed": False, "failures": ["parameter_rhat_max"], "constraint_set_hash": current}
@@ -344,9 +416,42 @@ def test_an_unreadable_comparand_fails_before_anything_is_deleted(make_staged_re
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("from an earlier validation")
     result = _invoke("validate-state-model", repo.config_path)
-    assert isinstance(result.exception, IsADirectoryError), result.exception
+    assert isinstance(result.exception, SystemExit), result.exception
+    # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps the message.
+    assert "comparand" in result.output
+    named = {name for names in found.values() for name in names}
+    for name in COMPARAND_FILES:
+        assert (name in result.output) is (name in named), name
+    assert ("unreadable" in result.output) is ("unreadable" in found)
     assert all(path.read_text() == "from an earlier validation" for path in earlier)
     assert not any((run / leftover).exists() for leftover in LEFTOVERS)
+
+
+def test_each_comparand_table_is_parsed_from_the_bytes_it_was_hashed_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record names the comparand by digest and the verdict is measured against its frames, so
+    both must come from one read. Each table is rewritten on disk the moment it has been read, as a
+    `validate` re-run beside the command would rewrite it: parsing it again from its path would
+    measure the verdict against a table the record does not name."""
+    _plant_comparand(tmp_path)
+    planted = {table: pl.read_parquet(tmp_path / f"{table}.parquet") for table in COMPARAND_TABLES}
+    recorded = json.loads((tmp_path / "validation_manifest.json").read_text())["output_hashes"]
+    read_bytes = Path.read_bytes
+
+    def then_rewritten(self: Path) -> bytes:
+        raw = read_bytes(self)
+        if self.suffix == ".parquet":
+            pl.DataFrame({"cell_id": ["rewritten"]}).write_parquet(self)
+        return raw
+
+    monkeypatch.setattr(Path, "read_bytes", then_rewritten)
+    comparand = _read_comparand(tmp_path)
+    monkeypatch.undo()
+    assert comparand.found is None
+    assert comparand.sha256 == recorded
+    for table in COMPARAND_TABLES:
+        assert comparand.frames[table].equals(planted[table]), table
 
 
 def test_a_store_that_cannot_be_read_fails_before_anything_is_deleted(
@@ -358,8 +463,7 @@ def test_a_store_that_cannot_be_read_fails_before_anything_is_deleted(
     `read_store` then fails on it with `KeyError`."""
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
-    for table in COMPARAND_TABLES:
-        (run / f"{table}.parquet").write_text("a comparand")
+    _plant_comparand(run)
     current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     plant_finished_fit(run, current)
     earlier = (

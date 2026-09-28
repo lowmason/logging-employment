@@ -692,7 +692,7 @@ def _unfinished_reasons(unfinished: dict[str, list[str]]) -> str:
 
     A mismatch is the manifest's word against an artifact's, and the artifact is the one named:
     `mismatched` says "its manifest", never the manifest's file, so every file a refusal names is
-    one to distrust.
+    one to distrust. `_read_comparand`'s findings share the shape and so the clause.
     """
     labels = {"mismatched": "not what its manifest records"}
     return "; ".join(
@@ -901,6 +901,71 @@ def validate_command(
         typer.echo(f"{regime} {entry['disposition']} scored={entry['n_scored']}")
 
 
+_COMPARAND_TABLES = ("validation_scores", "validation_metrics", "validation_scoreboard")
+
+
+class _Comparand(NamedTuple):
+    """This run's `validate` output as `_read_comparand` found it."""
+
+    frames: dict[str, pl.DataFrame]
+    sha256: dict[str, str]
+    found: dict[str, list[str]] | None
+
+
+def _read_comparand(run: Path) -> _Comparand:
+    """This run's `validate` output, each table read once, and why it is not what `validate` wrote.
+
+    §13.10 compares the model against this run's own comparand, and the record names it by
+    digest. The command took both on trust: it hashed whatever tables it found, parsed them again
+    from their paths after the harness, and never asked whether `validate` wrote them (#44, found
+    beside Codex's P1 on its publish). `validate` records the digest of each table it writes in
+    `validation_manifest.json`'s `output_hashes` (`validate_command`), so a table whose bytes are
+    not those is `mismatched`, the word `_unfinished_fit` uses for a fit artifact its manifest does
+    not vouch for, and no model is scored against a comparand that no `validate` wrote.
+
+    ONE READ PER TABLE. The bytes hashed are the bytes parsed, from memory, so a write between the
+    two -- `validate` re-run beside this command -- cannot make the record name one comparand while
+    the verdict is measured against another.
+
+    NO READ RAISES PAST THIS, the rule `_unfinished_fit` keeps (Codex on #43). A manifest that
+    cannot be read, does not parse to an object or records no digest for a table is `unreadable`,
+    and so is a table that cannot be read or, its digest matching, does not parse as Parquet.
+    `found` maps each kind to run-relative paths, as `_unfinished_fit`'s does, and is `None` only
+    when every table is what the manifest records, when `frames` holds all three.
+    """
+    import hashlib
+    import io
+    import json
+
+    import polars as pl
+
+    manifest = "validation_manifest.json"
+    try:
+        recorded = json.loads((run / manifest).read_text())["output_hashes"]
+        expected = {table: recorded[table] for table in _COMPARAND_TABLES}
+    except OSError, ValueError, KeyError, TypeError:
+        return _Comparand({}, {}, {"unreadable": [manifest]})
+    frames: dict[str, pl.DataFrame] = {}
+    sha256: dict[str, str] = {}
+    found: dict[str, list[str]] = {}
+    for table in _COMPARAND_TABLES:
+        path = f"{table}.parquet"
+        try:
+            raw = (run / path).read_bytes()
+        except OSError:
+            found.setdefault("unreadable", []).append(path)
+            continue
+        sha256[table] = hashlib.sha256(raw).hexdigest()
+        if sha256[table] != expected[table]:
+            found.setdefault("mismatched", []).append(path)
+            continue
+        try:
+            frames[table] = pl.read_parquet(io.BytesIO(raw))
+        except pl.exceptions.PolarsError:
+            found.setdefault("unreadable", []).append(path)
+    return _Comparand(frames, sha256, found or None)
+
+
 class _ValidationPaths(NamedTuple):
     """Where a state-model validation and an unfinished publish of one live in a run directory.
 
@@ -1067,10 +1132,7 @@ def validate_state_model_command(
     (`_publish_state_model_validation`). Both verdicts exit 0, because "deploy the simpler method"
     is an outcome and not an error.
     """
-    import hashlib
     import json
-
-    import polars as pl
 
     from .contracts import (
         VALIDATION_METRIC_SCHEMA,
@@ -1096,13 +1158,10 @@ def validate_state_model_command(
     # command closes that window even when it scores nothing. It restores or finishes; it never
     # removes the last validation.
     _settle_state_model_validation(run)
-    comparand = {
-        table: run / f"{table}.parquet"
-        for table in ("validation_scores", "validation_metrics", "validation_scoreboard")
-    }
     diagnostics = run / "posterior" / "diagnostics.json"
     for path, command in [
-        *((p, "validate") for p in comparand.values()),
+        *((run / f"{table}.parquet", "validate") for table in _COMPARAND_TABLES),
+        (run / "validation_manifest.json", "validate"),
         (diagnostics, "fit-state-model"),
     ]:
         if not path.exists():
@@ -1123,6 +1182,14 @@ def validate_state_model_command(
             f"{diagnostics} records a passing fit, but its artifacts are not one finished fit "
             f"({_unfinished_reasons(unfinished)}). Run `fit-state-model` first"
         )
+    # The comparand is read once, here, and refused unless it is what `validate` recorded writing,
+    # so the record names by digest the tables the verdict is measured against (`_read_comparand`).
+    comparand = _read_comparand(run)
+    if comparand.found is not None:
+        raise typer.BadParameter(
+            f"this run's comparand is not what `validate` wrote "
+            f"({_unfinished_reasons(comparand.found)}). Run `validate` first"
+        )
     # NOTHING OF THE LAST VALIDATION IS TOUCHED UNTIL THE NEW ONE IS WHOLE. Every read, the harness
     # and the verdict come first, and only `_publish_state_model_validation` writes. The last record
     # and its tables were deleted here, so anything that failed after this point, from a comparand
@@ -1133,10 +1200,7 @@ def validate_state_model_command(
         "model_version": MODEL_VERSION,
         "comparand": {
             "run_id": rid,
-            **{
-                f"{table}_sha256": hashlib.sha256(path.read_bytes()).hexdigest()
-                for table, path in comparand.items()
-            },
+            **{f"{table}_sha256": comparand.sha256[table] for table in _COMPARAND_TABLES},
         },
     }
     production_gate = json.loads(diagnostics.read_text())
@@ -1171,9 +1235,9 @@ def validate_state_model_command(
         model_id=MODEL_ID,
         model_scores=result.scores,
         model_metrics=result.metrics,
-        comparand_scores=pl.read_parquet(comparand["validation_scores"]),
-        comparand_metrics=pl.read_parquet(comparand["validation_metrics"]),
-        comparand_scoreboard=pl.read_parquet(comparand["validation_scoreboard"]),
+        comparand_scores=comparand.frames["validation_scores"],
+        comparand_metrics=comparand.frames["validation_metrics"],
+        comparand_scoreboard=comparand.frames["validation_scoreboard"],
         production_gate=production_gate,
         production_store_check=store_check,
         replicate_gates={

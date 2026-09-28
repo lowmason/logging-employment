@@ -48,8 +48,10 @@ command list — four of §16.1's fifteen do not exist yet (`fit-size-model`, `d
 `publish`, `run-all`). `validate-state-model` is not one of the fifteen: plan 16 added it so that
 `validate` stays the §13.10 comparand's command, byte for byte. `fit-state-model` gates on
 `schema_manifest.json` and `deterministic_bounds.parquet`, and refuses bounds solved against another
-`constraint_set_hash`; `validate-state-model` on the three `validation_*` tables and
-`posterior/diagnostics.json`. The two commands that read a fit, `reconcile` and
+`constraint_set_hash`; `validate-state-model` on the three `validation_*` tables, the
+`validation_manifest.json` that records their digests, and `posterior/diagnostics.json`, and it
+refuses tables whose digests that manifest does not record (`cli.py::_read_comparand`). The two
+commands that read a fit, `reconcile` and
 `validate-state-model`, refuse one whose `diagnostics.json` names another `constraint_set_hash`
 (`cli.py::_stale_fit`): a fit outlives its constraint set whenever `build-constraints` re-runs
 without a re-fit, and its draws would re-verify clean against their own bounds. They also refuse,
