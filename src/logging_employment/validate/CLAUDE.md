@@ -56,6 +56,8 @@ anything moves, and then the last tables go to `state_model_validation.old/`, th
 and the staged record over the last, which is the commit (`cli.py::_publish_state_model_validation`).
 A failure or a kill before that rename leaves the last record and its tables, once
 `cli.py::_settle_state_model_validation` has run: on the exception, or at the command's next start.
+That holds for one invocation at a time. Nothing locks a run, and a second invocation's settle can
+undo a publish in flight (`D-138`).
 
 - **The producer seam (plan 16).** A `harness.Producer` turns one masked frame and its
   `MaskedSystem` into `Production(results, interval_metrics, notes)`. `BaselineProducer` wraps

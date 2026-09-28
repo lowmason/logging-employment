@@ -928,10 +928,13 @@ def _read_comparand(run: Path) -> _Comparand:
     the verdict is measured against another.
 
     NO READ RAISES PAST THIS, the rule `_unfinished_fit` keeps (Codex on #43). A manifest that
-    cannot be read, does not parse to an object or records no digest for a table is `unreadable`,
-    and so is a table that cannot be read or, its digest matching, does not parse as Parquet.
-    `found` maps each kind to run-relative paths, as `_unfinished_fit`'s does, and is `None` only
-    when every table is what the manifest records, when `frames` holds all three.
+    cannot be read, does not parse to an object, or records no digest for a table, or anything but
+    a string for one, is `unreadable`: a `null` compared as a digest would blame the table, the one
+    file that is whole. So is a table that cannot be read or, its digest matching, does not parse
+    as Parquet, whether polars raises or panics. A panic is `PanicException`, which subclasses
+    `BaseException`, not `PolarsError`, and the #44 review measured 5 of 400 corrupted tables
+    raising it. `found` maps each kind to run-relative paths, as `_unfinished_fit`'s does, and is
+    `None` only when every table is what the manifest records, when `frames` holds all three.
     """
     import hashlib
     import io
@@ -944,6 +947,8 @@ def _read_comparand(run: Path) -> _Comparand:
         recorded = json.loads((run / manifest).read_text())["output_hashes"]
         expected = {table: recorded[table] for table in _COMPARAND_TABLES}
     except OSError, ValueError, KeyError, TypeError:
+        return _Comparand({}, {}, {"unreadable": [manifest]})
+    if not all(isinstance(digest, str) for digest in expected.values()):
         return _Comparand({}, {}, {"unreadable": [manifest]})
     frames: dict[str, pl.DataFrame] = {}
     sha256: dict[str, str] = {}
@@ -961,7 +966,7 @@ def _read_comparand(run: Path) -> _Comparand:
             continue
         try:
             frames[table] = pl.read_parquet(io.BytesIO(raw))
-        except pl.exceptions.PolarsError:
+        except pl.exceptions.PolarsError, pl.exceptions.PanicException:
             found.setdefault("unreadable", []).append(path)
     return _Comparand(frames, sha256, found or None)
 
@@ -1013,14 +1018,28 @@ def _settle_state_model_validation(run: Path) -> None:
     staged directory are removed, in that order. With no staged record, a `.old` beside the
     tables is the tail of a publish that committed, and is deleted, and a `.old` alone is the last
     tables of a swap killed between its renames by the code before this protocol, and is moved
-    back. A staged directory with no staged record is only ever a write that did not finish.
+    back. A staged directory with no staged record is a write that did not finish, or new tables
+    an undo moved out and was stopped before deleting, and either way it is deleted.
 
     IT RAISES RATHER THAN GUESS. Nothing it removes is the last validation, so a failure here
-    leaves a state the next call settles. It never removes `.old` quietly: one it could not delete
-    must stop the next publish, or that publish, failing at its commit, would put a stale `.old`
-    back as the last tables. And `os.replace` onto an existing empty directory succeeds without a
-    word, so a `.old` beside tables that are not new is refused (`UnsettledPublishError`) rather
-    than renamed over them.
+    leaves a state the next call settles. It never removes `.old` quietly: a publish beside one it
+    could not delete would fail its first rename, and its undo would stop on
+    `UnsettledPublishError` with staged leftovers, blaming two invocations at once for a directory
+    that could not be deleted, so the deletion's own error is raised before anything is staged.
+    And `os.replace` onto an existing empty directory succeeds without a word, so a `.old` beside
+    tables that are not new is refused (`UnsettledPublishError`) rather than renamed over them.
+
+    ONE INVOCATION AT A TIME. Nothing locks a run, and a staged record looks the same whether its
+    publish was killed or is still renaming. So every guarantee here holds only while no other
+    `validate-state-model` is running on the run. Beside one that is publishing, a settle, the
+    opening settle of an invocation that then refuses included, can undo its staging under it.
+    The #44 review showed one result in scratch: the publish fails at its commit, its handler's
+    settle deletes the last tables as a committed tail, and the last record is left beside the new
+    tables with nothing for a later settle to find. A settle during the staging is worse, and was
+    measured the same way: it deletes the staging directory as an unfinished write,
+    `build.write_parquet_deterministic` recreates it for the next table, and the publish returns
+    without an error, having committed a record beside tables missing those written before
+    (`D-138`).
     """
     import os
     import shutil
@@ -1071,13 +1090,14 @@ def _publish_state_model_validation(
     Any exception is raised as it was, once `_settle_state_model_validation` has left one whole
     validation: the last, byte for byte, unless the record's rename ran, and the new one if it
     did. If the settle fails too, its error is raised instead, with the original as its context,
-    and the next call settles what it left. A kill anywhere leaves leftovers that the next `validate-state-model` settles before it
-    reads anything. Until then, a kill between the first rename and the commit leaves the last
-    record beside new tables, or none, and nothing in this package reads `state_model_validation/`.
-    An interrupt after the commit exits non-zero with the new validation published. Nothing is
-    fsynced, so this is atomic against a process that dies, not a machine that does, and two
-    publishes on one run at once are not serialised: the second can stop on
-    `UnsettledPublishError`.
+    and the next call settles what it left. A kill anywhere leaves leftovers that the next
+    `validate-state-model` settles before it reads anything. Until then, a kill between the first
+    rename and the commit leaves the last record beside new tables, or none, and nothing in this
+    package reads `state_model_validation/`. An interrupt after the commit exits non-zero with the
+    new validation published. Nothing is fsynced, so this is atomic against a process that dies,
+    not a machine that does. And nothing locks a run: all of this holds for one invocation at a
+    time, and a second one's settle can undo a publish in flight, leaving a record beside tables it
+    does not describe and no leftover to settle (`_settle_state_model_validation`, `D-138`).
 
     The record carries the digests of the tables it describes (`model_validation_hashes`). A
     failed gate publishes no tables and no manifest: the last validation's tables are replaced by
@@ -1158,7 +1178,8 @@ def validate_state_model_command(
     # A publish killed last time left its leftovers, and until they are settled the last record
     # can stand beside new tables. Settled here, before any refusal below, so the next run of this
     # command closes that window even when it scores nothing. It restores or finishes; it never
-    # removes the last validation.
+    # removes the last validation. Run one invocation at a time: beside another's publish it can
+    # undo that publish under it (`_settle_state_model_validation`, `D-138`).
     _settle_state_model_validation(run)
     diagnostics = run / "posterior" / "diagnostics.json"
     for path, command in [

@@ -56,6 +56,7 @@ COMPARAND_DAMAGE = {
     "manifest_cut_short": {"unreadable": ["validation_manifest.json"]},
     "manifest_is_a_directory": {"unreadable": ["validation_manifest.json"]},
     "manifest_names_no_scoreboard": {"unreadable": ["validation_manifest.json"]},
+    "manifest_records_a_null_digest": {"unreadable": ["validation_manifest.json"]},
     "scores_rewritten": {"mismatched": ["validation_scores.parquet"]},
     "metrics_is_a_directory": {"unreadable": ["validation_metrics.parquet"]},
     "scoreboard_not_parquet": {"unreadable": ["validation_scoreboard.parquet"]},
@@ -83,8 +84,10 @@ def _plant_comparand(run: Path, damage: str | None = None) -> None:
     Each table is a one-row Parquet file, not `validate`'s schema, because the command parses what
     it hashes and compares nothing on the failed-gate path these tests take. `damage` is a key of
     `COMPARAND_DAMAGE`, applied after the manifest is written: a manifest cut short or a directory
-    (which fails to read even as root), one that records no digest for a table, a table rewritten
-    since, a table that is a directory, and one whose digest matches but which is not Parquet.
+    (which fails to read even as root), one that records no digest for a table or `null` for one,
+    a table rewritten since, a table that is a directory, and one whose digest matches but which
+    is not Parquet. A `null` is the manifest's fault, not the table's: blaming the table would send
+    a reader to distrust the one file that is whole.
     """
     for table in COMPARAND_TABLES:
         path = run / f"{table}.parquet"
@@ -95,6 +98,8 @@ def _plant_comparand(run: Path, damage: str | None = None) -> None:
     hashes = {table: _sha256(run / f"{table}.parquet") for table in COMPARAND_TABLES}
     if damage == "manifest_names_no_scoreboard":
         del hashes["validation_scoreboard"]
+    elif damage == "manifest_records_a_null_digest":
+        hashes["validation_metrics"] = None
     manifest = run / "validation_manifest.json"
     manifest.write_text(json.dumps({"estimators": ["a_baseline"], "output_hashes": hashes}))
     if damage == "manifest_cut_short":
@@ -107,7 +112,12 @@ def _plant_comparand(run: Path, damage: str | None = None) -> None:
     elif damage == "metrics_is_a_directory":
         (run / "validation_metrics.parquet").unlink()
         (run / "validation_metrics.parquet").mkdir()
-    elif damage not in {None, "scoreboard_not_parquet", "manifest_names_no_scoreboard"}:
+    elif damage not in {
+        None,
+        "scoreboard_not_parquet",
+        "manifest_names_no_scoreboard",
+        "manifest_records_a_null_digest",
+    }:
         raise ValueError(f"no such damage: {damage!r}")
 
 
@@ -450,25 +460,79 @@ def test_each_comparand_table_is_parsed_from_the_bytes_it_was_hashed_from(
     """The record names the comparand by digest and the verdict is measured against its frames, so
     both must come from one read. Each table is rewritten on disk the moment it has been read, as a
     `validate` re-run beside the command would rewrite it: parsing it again from its path would
-    measure the verdict against a table the record does not name."""
+    measure the verdict against a table the record does not name. The rewrite hangs on
+    `Path.read_bytes`, so the test also asserts it fired for every table: a read by any other route
+    -- `open` and `hashlib.file_digest`, say -- would otherwise never trigger it, and pass."""
     _plant_comparand(tmp_path)
     planted = {table: pl.read_parquet(tmp_path / f"{table}.parquet") for table in COMPARAND_TABLES}
     recorded = json.loads((tmp_path / "validation_manifest.json").read_text())["output_hashes"]
     read_bytes = Path.read_bytes
+    rewritten: list[str] = []
 
     def then_rewritten(self: Path) -> bytes:
         raw = read_bytes(self)
         if self.suffix == ".parquet":
             pl.DataFrame({"cell_id": ["rewritten"]}).write_parquet(self)
+            rewritten.append(self.name)
         return raw
 
     monkeypatch.setattr(Path, "read_bytes", then_rewritten)
     comparand = _read_comparand(tmp_path)
     monkeypatch.undo()
+    assert sorted(rewritten) == sorted(f"{table}.parquet" for table in COMPARAND_TABLES)
     assert comparand.found is None
     assert comparand.sha256 == recorded
     for table in COMPARAND_TABLES:
         assert comparand.frames[table].equals(planted[table]), table
+
+
+def test_a_comparand_the_parquet_reader_panics_on_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """polars' Parquet reader can panic rather than raise on bytes it cannot parse: measured in the
+    #44 review, 5 of 400 corrupted scoreboards raised `PanicException`, which subclasses
+    `BaseException`, not `PolarsError`. A manifest that vouches for such bytes must still be
+    refused, never raised past `_read_comparand`. The panic is injected, so the test does not
+    depend on which corruption a given polars panics on."""
+    _plant_comparand(tmp_path)
+
+    def panics(*args: object, **kwargs: object) -> pl.DataFrame:
+        raise pl.exceptions.PanicException("assertion failed: offset + length <= self.length")
+
+    monkeypatch.setattr(pl, "read_parquet", panics)
+    comparand = _read_comparand(tmp_path)
+    monkeypatch.undo()
+    assert comparand.found == {"unreadable": [f"{table}.parquet" for table in COMPARAND_TABLES]}
+
+
+@pytest.mark.parametrize("killed", ["before_its_commit", "between_3accb25s_renames"])
+def test_a_refused_run_first_settles_what_a_killed_publish_left(make_staged_repo, killed) -> None:
+    """The command settles before any refusal, so even a run that scores nothing puts the last
+    validation back where readers look. Nothing of the comparand is planted, so the command is
+    refused by its first precondition. `before_its_commit` is a publish killed after its tables
+    were renamed in and before its record was: the last record beside new tables, the last tables
+    at `.old` and the staged record. `between_3accb25s_renames` is the swap this PR replaced,
+    killed between its two renames: the last tables at `.old` and none in place."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    (run / "promotion_record.json").write_text("the last record")
+    (run / "state_model_validation.old").mkdir()
+    (run / "state_model_validation.old" / "validation_scores.parquet").write_text("the last scores")
+    if killed == "before_its_commit":
+        (run / "state_model_validation").mkdir()
+        (run / "state_model_validation" / "validation_manifest.json").write_text("new")
+        (run / "promotion_record.json.partial").write_text("the new record")
+    result = _invoke("validate-state-model", repo.config_path)
+    assert isinstance(result.exception, SystemExit), result.exception
+    # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps the message.
+    assert "validation_scores.parquet" in result.output
+    assert "missing" in result.output
+    assert (run / "promotion_record.json").read_text() == "the last record"
+    tables = run / "state_model_validation"
+    assert {path.name: path.read_text() for path in tables.iterdir()} == {
+        "validation_scores.parquet": "the last scores"
+    }
+    assert not any((run / leftover).exists() for leftover in LEFTOVERS)
 
 
 def test_a_store_that_cannot_be_read_fails_before_anything_is_deleted(

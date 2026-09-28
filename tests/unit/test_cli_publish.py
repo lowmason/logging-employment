@@ -238,12 +238,13 @@ def test_a_first_publish_that_fails_at_its_commit_leaves_nothing(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_the_last_tables_left_at_old_by_a_kill_are_put_back_first(
+def test_the_last_tables_left_at_old_by_a_kill_are_put_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """3accb25's swap killed between its renames left the last tables at `.old` and no target.
-    The next publish puts them back before anything else, so even when it fails at its commit,
-    the last tables are where readers look."""
+    A publish that fails at its commit leaves them where readers look. Which of its two settles
+    puts them back, the one before it writes or its handler's, cannot be seen from here: the kill
+    sweep, which publishes on what a kill left, is what tests the first."""
     (tmp_path / "promotion_record.json").write_text("the last record")
     old = tmp_path / "state_model_validation.old"
     old.mkdir()
@@ -263,8 +264,11 @@ def test_a_superseded_old_that_cannot_be_deleted_stops_the_next_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gate_passed: bool
 ) -> None:
     """A publish that committed and was killed while deleting `.old` leaves it beside its own
-    tables. The next publish deletes it before it stages anything, and if it cannot, it stops:
-    carrying on would leave a stale `.old` for its own undo to put back as the last tables."""
+    tables. The next publish deletes it before it stages anything, and if it cannot, it stops
+    there, naming the directory it could not delete. Carrying on would not lose a validation: its
+    first rename would fail beside the stale `.old`, and its undo would stop on
+    `UnsettledPublishError` with staged leftovers, blaming two invocations at once for a directory
+    that could not be deleted. So the real fault is raised before anything is staged."""
     last = _plant_the_last_validation(tmp_path)
     old = tmp_path / "state_model_validation.old"
     old.mkdir()
@@ -383,7 +387,8 @@ def test_a_publish_killed_at_any_step_is_settled_by_the_next(
     n-th mutation, so no handler runs. Settling what it left gives the last validation or, only
     once the record's rename ran, the new one. A settle itself cut short at any of its own steps
     (it has no handler, so a raise nothing catches leaves what a kill would) settles to the same
-    place next time. And a publish after any kill leaves the new validation."""
+    place next time. And a publish after any kill leaves the new validation: it runs on a copy of
+    what the kill left, unsettled, so the settle it runs before writing a byte is the one tested."""
     monkeypatch.setattr(
         runs, "code_provenance", lambda start=None: {"code_commit": "c", "uv_lock_sha256": "u"}
     )
@@ -418,8 +423,10 @@ def test_a_publish_killed_at_any_step_is_settled_by_the_next(
                 break
             _settle_state_model_validation(again)
             assert _tree(again) == settled, (n, step)
-        _publish(run, gate_passed)
-        assert _tree(run) == new, n
+        republished = tmp_path / f"republished{n}"
+        shutil.copytree(killed, republished)
+        _publish(republished, gate_passed)
+        assert _tree(republished) == new, n
     else:
         pytest.fail("the publish never ran to its end")
     assert settled_new, "no kill landed after the commit and before `.old` was deleted"

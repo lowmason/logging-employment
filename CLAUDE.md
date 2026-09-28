@@ -66,7 +66,9 @@ the record's rename is the commit (`cli.py::_publish_state_model_validation`, Co
 failure an hour into D1's 27 fits, or a record that cannot be written, keeps the last record and
 its tables, and the leftovers of a killed publish are settled when the command next starts
 (`cli.py::_settle_state_model_validation`), which refuses with `UnsettledPublishError` the one
-state no single publish leaves.
+state no single publish leaves. **Run one `validate-state-model` per run at a time**: nothing locks
+a run, and a second invocation's opening settle, even one that then refuses, can undo a publish in
+flight under it, leaving a record beside tables it does not describe and nothing to settle (`D-138`).
 
 Markers are declared but never applied by `addopts`: `slow` is on one unit test and EIGHT
 integration modules (seventeen `mark.slow` sites since plan 16, which added the three model

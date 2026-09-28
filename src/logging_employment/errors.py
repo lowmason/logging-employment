@@ -202,5 +202,6 @@ class UnsettledPublishError(LoggingEmploymentError):
     finishes or undoes it. One state it cannot read: a staged record with the last tables at
     `.old` beside other tables. Renaming `.old` over them would be a guess, and `os.replace` onto
     an empty directory succeeds without a word, so it is refused, naming both, for a human to
-    settle. Two publishes on one run at once can leave it; nothing else does.
+    settle. Two invocations of `validate-state-model` on one run at once can leave it; nothing else
+    does. They can also leave worse without raising this, since nothing locks a run (`D-138`).
     """
