@@ -2664,3 +2664,79 @@ this protocol, and `D-131` and `D-132` come from the promotion record. The measu
       Size: plan. Done when: a sampler setting measured on two seeds clears the production gate by a
       stated margin and passes all 27 replicate fits, and it is set in `config.yaml` before Stage 7's
       §13.10 re-run.
+
+## PR #44 follow-ups — 2026-09-28
+
+Codex's P1 on #44 was that `validate-state-model` swapped its new tables in before its record was
+written, so a record write that failed left the last record beside the new tables. #44 fixed that
+command, and two siblings in its own inputs, the comparand and the fit it names. A sweep of the other
+commands for the same classes found what is below; #44 left them alone, since each is another
+command's contract. `D-130` is one of these classes and was already open. Each claim was re-read
+against the code at #44's head; the pins are symbols, not lines.
+
+- [ ] `D-133` **Every command but `validate-state-model` replaces its outputs in place, one file at a
+      time, so a failure partway leaves files that no single run wrote.** `build.write_parquet_deterministic`
+      writes each table straight to its path, so a failure mid-write leaves that table cut short, and
+      each command then writes several. `build_harmonized` writes its five staged tables one by one
+      with no manifest, and `cli.py::_input_digests` hashes whatever is in `data/staged/`, so a build
+      that fails partway gives a mix of new and old tables a run id of its own. It resolves the parent
+      series before the first write for that reason, and nothing covers a failure after it.
+      `build-constraints` writes its three tables into the shared `data/constraints/`, then
+      `config.resolved.yaml`, `schema_manifest.json` and, after the manifest, `constraint_manifest.parquet`.
+      `solve-bounds` writes three tables and then `bounds_manifest.json`, `run-baselines` two and then
+      `baseline_manifest.json`, and `validate` three and then `validation_manifest.json`. Some readers
+      catch a mix: `solve-bounds` re-derives the constraint-set hash from the tables (`load_system`),
+      `validate-state-model` refuses a comparand whose digests are not `validate`'s own (#44), and
+      `_unfinished_fit` refuses a fit whose manifest does not vouch for it. The rest have no check.
+      The staged layer is one, `run-baselines` reads the bounds unchecked (`D-130`), and `reconcile`
+      reads the baseline results unchecked (`D-135`). `component_rank`, `disclosure_flags` and the
+      manifests have no reader in the package, but §14 and a reader of the run do.
+      Size: plan. Done when: each command either publishes bytes first with one commit point, as
+      `cli.py::_publish_state_model_validation` does, or each reader refuses a mix by the digests its
+      writer's manifest records, and a kill test per command shows no mix is ever read as a run.
+- [ ] `D-134` **`RawStore.put`, `write_source_manifest` and `config.resolved.yaml` are written in place,
+      so an interrupted write leaves the file cut short.** The worst is `store.py::RawStore.put`. The
+      store is content-addressed and written once, and `put` calls `write_bytes` on the object's final
+      path. A kill mid-write leaves a truncated object whose path claims a digest its bytes do not
+      have, and every later `put` of the same response sees it exists, leaves it alone and reports
+      `was_already_present`. `fetching.write_source_manifest` rewrites `runs/source_manifest.parquet`
+      in place, and that file is how `build.snapshot_paths` resolves CBP's ambiguous snapshots. The
+      cut-short manifest fails when read, and with it the record of which snapshots a run used, though
+      the stored bytes remain. `build-constraints`
+      writes `config.resolved.yaml` with `write_text`, and nothing reads it back.
+      Size: quick-fix. Done when: each writes a `.partial` sibling and renames it, as
+      `cli.py::_write_manifest` does, `put` refuses an existing object whose bytes are not its digest,
+      and a test interrupts each write and finds the last file whole or none.
+- [ ] `D-135` **`reconcile` verifies whatever `baseline_results.parquet` it finds, and hashes it in a
+      second read.** `cli.py::reconcile_command` checks only that the file exists. It compares neither
+      its digest with `baseline_manifest.json`'s `output_hashes` nor its `constraint_set_hash` column
+      with `schema_manifest.json`'s. So after `build-constraints` re-runs under the same id, or after a
+      `run-baselines` that failed between its results and its manifest (`D-133`), it verifies results
+      that no current run vouches for, and records their digest as what it checked. It also parses the
+      file with `pl.read_parquet(path)` and takes `baseline_results_sha256` from a second
+      `path.read_bytes()`, so the recorded digest need not be of the rows it verified. #44 closed the
+      same gap for `validate-state-model`'s comparand (`cli.py::_read_comparand`).
+      Size: quick-fix. Done when: `reconcile` reads the results once, hashing and parsing the same
+      bytes, and refuses results that its manifest or the run's constraint set does not vouch for, with
+      tests for a rewritten file and for a changed constraint set.
+- [ ] `D-136` **A fit is tied to its bounds only by `constraint_set_hash`, so bounds re-solved under
+      the same constraint set leave it looking current.** `run_id` does not cover code, so `solve-bounds`
+      can re-run under the same id after a change to `constraints/bounds.py` and rewrite
+      `deterministic_bounds.parquet` without changing the constraint set. The fit's report records only
+      `constraint_set_hash`, so `cli.py::_stale_fit` passes, and `reconcile` and `validate-state-model`
+      re-check the draws against the `deterministic_lower` and `deterministic_upper` stored with them
+      (`models/arviz_io.py`), not the bounds on disk. Draws reconciled into the old bounds then
+      re-verify clean.
+      Size: quick-fix. Done when: `fit-state-model` records the digest of the bounds it reconciled
+      into, `_stale_fit` refuses a fit whose recorded digest is not the current file's, and a test
+      rewrites the bounds under an unchanged constraint set and sees both commands refuse.
+- [ ] `D-137` **`reconcile_manifest.json`'s `state_model` verdict does not name the fit it checked, and
+      a re-fit leaves it standing.** `fit-state-model` deletes `posterior/`, `posterior_summary.parquet`
+      and `state_model_manifest.json` but not `reconcile_manifest.json`, and `reconcile` records
+      `draws_sha256_matches` but not the digest itself. After a re-fit, the last verdict stands beside
+      new draws, and nothing in it tells the two apart. The promotion record has named its fit since #44
+      (`fit`: `diagnostics_sha256`, `constraint_set_hash`, `draws_sha256`). Nothing in the package reads
+      either manifest.
+      Size: quick-fix. Done when: `reconcile`'s `state_model` block names the fit the way the
+      promotion record's `fit` does, and a test re-fits after `reconcile` and finds the verdict's fit
+      differ from the new one.
