@@ -130,7 +130,9 @@ in `runs/<run_id>/` beside one JSON manifest per command.
   `cli.py::_input_digests`); optional keys are *omitted*, never null, so they do not re-id existing runs. The
   id therefore covers config + input data but **not source code** — which is why every JSON RUN
   manifest also carries `code_commit` and `uv_lock_sha256` from `runs.code_provenance` (plan 13, R-S5P-5),
-  written through the single `cli.py::_write_manifest`. (`runs/source_manifest.parquet`
+  written through the single `cli.py::_write_manifest`, which replaces each manifest whole: a
+  `.partial` sibling, then `os.replace`, so a full disk never leaves one truncated (Codex on #42).
+  (`runs/source_manifest.parquet`
   carries neither — `fetching.write_source_manifest` does not go through that writer.) Those sit BESIDE the id, never inside it:
   hashing the commit in would rename every run directory on every commit. `code_provenance`
   records, never raises — `"unknown"` when unanswerable — and marks a dirty tree `<sha>-dirty`,

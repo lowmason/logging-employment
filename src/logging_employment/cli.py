@@ -113,12 +113,27 @@ def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
     `indent=2, sort_keys=True` shape every one of these files already had -- `solve-bounds` reads
     `schema_manifest.json` as a precondition gate and an integration test pins its bytes, so the
     formatting is not free to drift.
+
+    A MANIFEST IS REPLACED WHOLE (Codex on #42). `Path.write_text` truncates before it writes, so
+    a full disk or a kill mid-write left an empty or partial manifest where readers look, and
+    `_unfinished_fit` read that file's existence as a finished fit. The text goes to a `.partial`
+    sibling, and `os.replace` renames it over the manifest, which is atomic within a directory. A
+    write that fails removes its sibling. A process killed outright can leave one, and no reader
+    opens it.
     """
     import json
+    import os
 
     from .runs import code_provenance
 
-    path.write_text(json.dumps({**payload, **code_provenance()}, indent=2, sort_keys=True))
+    text = json.dumps({**payload, **code_provenance()}, indent=2, sort_keys=True)
+    partial = path.with_name(f"{path.name}.partial")
+    try:
+        partial.write_text(text)
+        os.replace(partial, path)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
 
 
 def _input_digests(cfg: Config) -> dict[str, str]:
