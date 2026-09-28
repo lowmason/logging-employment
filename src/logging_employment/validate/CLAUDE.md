@@ -50,9 +50,12 @@ ValidationResult(scores, metrics, scoreboard, manifest)`. Two production callers
 `validation_manifest.json` into `runs/<id>/`. Since plan 16, `cli.py::validate_state_model_command`
 scores §11's model through `producer=StateModelProducer()` and writes the same three tables into
 `runs/<id>/state_model_validation/`, then §13.10's record to `runs/<id>/promotion_record.json`.
-Neither replaces the last one until both are whole: the tables are staged in
-`state_model_validation.partial/` and swapped in, then the record is written
-(`cli.py::_publish_state_model_validation`).
+The two are replaced together or not at all (Codex on #44): the tables go to
+`state_model_validation.partial/` and the record to `promotion_record.json.partial`, last, before
+anything moves, and then the last tables go to `state_model_validation.old/`, the staged ones in,
+and the staged record over the last, which is the commit (`cli.py::_publish_state_model_validation`).
+A failure or a kill before that rename leaves the last record and its tables, once
+`cli.py::_settle_state_model_validation` has run: on the exception, or at the command's next start.
 
 - **The producer seam (plan 16).** A `harness.Producer` turns one masked frame and its
   `MaskedSystem` into `Production(results, interval_metrics, notes)`. `BaselineProducer` wraps

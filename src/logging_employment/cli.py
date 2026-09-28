@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import typer
 
@@ -102,6 +102,42 @@ def _constraints_dir(cfg: Config) -> Path:
     return Path(cfg.storage.constraints_uri)
 
 
+def _partial(path: Path) -> Path:
+    """The sibling a file or directory is written to before it is renamed over `path`.
+
+    One name for every such sibling, so the manifest writer, the staged promotion record and the
+    staged validation tables agree on what an unfinished write looks like. No reader opens one.
+    """
+    return path.with_name(f"{path.name}.partial")
+
+
+def _stage_manifest(path: Path, payload: Mapping[str, object]) -> Path:
+    """Write the bytes `_write_manifest` puts at `path` to its `.partial` sibling, and return it.
+
+    The format lives here and only here. `_write_manifest` renames the sibling over `path` at
+    once. `_publish_state_model_validation` stages the promotion record this way and renames it
+    only once the tables it describes are in place, as its commit point (Codex on #44), and a
+    second `json.dumps` for that record would let the two formats drift apart.
+
+    The stamp is merged LAST so no caller can shadow or drop it, and the JSON keeps the
+    `indent=2, sort_keys=True` shape every one of these files already had -- `solve-bounds` reads
+    `schema_manifest.json` as a precondition gate and an integration test pins its bytes, so the
+    formatting is not free to drift. A write that fails removes its sibling.
+    """
+    import json
+
+    from .runs import code_provenance
+
+    text = json.dumps({**payload, **code_provenance()}, indent=2, sort_keys=True)
+    partial = _partial(path)
+    try:
+        partial.write_text(text)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    return partial
+
+
 def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
     """Write one run manifest, stamped with the code identity that produced it.
 
@@ -109,12 +145,8 @@ def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
     input data but deliberately not source (`runs.code_provenance`), so `code_commit` and
     `uv_lock_sha256` are the only things in `runs/<id>/` that can answer "was this directory
     written by the code I am reading?". A per-command `json.dumps` at each site made adding them
-    five edits, and made forgetting them on the sixth manifest the default outcome.
-
-    The stamp is merged LAST so no caller can shadow or drop it, and the JSON keeps the
-    `indent=2, sort_keys=True` shape every one of these files already had -- `solve-bounds` reads
-    `schema_manifest.json` as a precondition gate and an integration test pins its bytes, so the
-    formatting is not free to drift.
+    five edits, and made forgetting them on the sixth manifest the default outcome. The bytes are
+    `_stage_manifest`'s, which the promotion record shares.
 
     A MANIFEST IS REPLACED WHOLE (Codex on #42). `Path.write_text` truncates before it writes, so
     a full disk or a kill mid-write left an empty or partial manifest where readers look, and
@@ -124,50 +156,14 @@ def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
     directory. A write that fails removes its sibling. A process killed outright can leave one, and
     no reader opens it.
     """
-    import json
     import os
 
-    from .runs import code_provenance
-
-    text = json.dumps({**payload, **code_provenance()}, indent=2, sort_keys=True)
-    partial = path.with_name(f"{path.name}.partial")
+    partial = _stage_manifest(path, payload)
     try:
-        partial.write_text(text)
         os.replace(partial, path)
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
-
-
-def _replace_directory(staged: Path, target: Path) -> None:
-    """Put `staged` where `target` is, and delete the old `target` only once `staged` is in place.
-
-    `_write_manifest`'s rule for one file, applied to a directory, which `os.replace` cannot move
-    over a non-empty one. So there are two renames, the old directory to a `.old` sibling and then
-    `staged` to `target`, and `.old` is deleted only after both. If the second rename fails, the
-    first is undone, so a failure here never leaves `target` missing. A kill between the two can,
-    and it leaves the old directory at `.old`, so the next swap moves it back before anything else
-    rather than deleting it as a leftover. A `.old` beside a `target` is the tail of a swap that
-    finished, and is deleted.
-    """
-    import os
-    import shutil
-
-    old = target.with_name(f"{target.name}.old")
-    if old.exists():
-        if target.exists():
-            shutil.rmtree(old)
-        else:
-            os.replace(old, target)
-    if target.exists():
-        os.replace(target, old)
-    try:
-        os.replace(staged, target)
-    except BaseException:
-        if old.exists():
-            os.replace(old, target)
-        raise
-    shutil.rmtree(old, ignore_errors=True)
 
 
 def _input_digests(cfg: Config) -> dict[str, str]:
@@ -905,6 +901,88 @@ def validate_command(
         typer.echo(f"{regime} {entry['disposition']} scored={entry['n_scored']}")
 
 
+class _ValidationPaths(NamedTuple):
+    """Where a state-model validation and an unfinished publish of one live in a run directory.
+
+    Named once, because `_settle_state_model_validation` reads a publish's progress from exactly
+    these five, and a name spelled differently in the publisher would be a leftover it never sees.
+    """
+
+    record: Path
+    staged_record: Path
+    tables: Path
+    staged_tables: Path
+    old_tables: Path
+
+    @classmethod
+    def of(cls, run: Path) -> _ValidationPaths:
+        """The five paths in `run`."""
+        record = run / "promotion_record.json"
+        tables = run / "state_model_validation"
+        return cls(
+            record=record,
+            staged_record=_partial(record),
+            tables=tables,
+            staged_tables=_partial(tables),
+            old_tables=tables.with_name(f"{tables.name}.old"),
+        )
+
+
+def _settle_state_model_validation(run: Path) -> None:
+    """Finish or undo a publish of `run`'s state-model validation that did not run to its end.
+
+    ONE FUNCTION FOR AN EXCEPTION AND FOR A KILL, and it reads the disk, not the code path.
+    `validate_state_model_command` calls it first, before it reads anything, and
+    `_publish_state_model_validation` calls it before it writes a byte and as its handler, for a
+    publish that raised. Which call raised proves nothing about what moved: an interrupt can land
+    after `os.replace` has renamed and before it returns. So the leftovers decide, and running
+    this twice does nothing the first run did not.
+
+    THE STAGED RECORD IS THE EVIDENCE. `promotion_record.json.partial` is the last byte a publish
+    writes and the first thing an undo removes, so while it exists the publish has not committed
+    and the last record is still `promotion_record.json`. The new tables are then wherever the
+    renames left them: staged until they were renamed in, `state_model_validation/` after. A staged
+    record with no staged directory therefore means they were moved in, and they are moved back
+    out -- which is the only way to undo a publish that had no last tables to move to `.old`, the
+    first one among them. The last tables come back from `.old`, then the staged record and the
+    staged directory are removed, in that order. With no staged record, a `.old` beside the
+    tables is the tail of a publish that committed, and is deleted, and a `.old` alone is the last
+    tables of a swap killed between its renames by the code before this protocol, and is moved
+    back. A staged directory with no staged record is only ever a write that did not finish.
+
+    IT RAISES RATHER THAN GUESS. Nothing it removes is the last validation, so a failure here
+    leaves a state the next call settles. It never removes `.old` quietly: one it could not delete
+    must stop the next publish, or that publish, failing at its commit, would put a stale `.old`
+    back as the last tables. And `os.replace` onto an existing empty directory succeeds without a
+    word, so a `.old` beside tables that are not new is refused (`UnsettledPublishError`) rather
+    than renamed over them.
+    """
+    import os
+    import shutil
+
+    from .errors import UnsettledPublishError
+
+    paths = _ValidationPaths.of(run)
+    if paths.staged_record.exists():
+        if paths.tables.exists() and not paths.staged_tables.exists():
+            os.replace(paths.tables, paths.staged_tables)
+        if paths.old_tables.exists():
+            if paths.tables.exists():
+                raise UnsettledPublishError(
+                    f"{paths.old_tables} holds the last state-model validation's tables beside "
+                    f"{paths.tables}, which no single publish leaves: settle the two by hand"
+                )
+            os.replace(paths.old_tables, paths.tables)
+        paths.staged_record.unlink()
+    elif paths.old_tables.exists():
+        if paths.tables.exists():
+            shutil.rmtree(paths.old_tables)
+        else:
+            os.replace(paths.old_tables, paths.tables)
+    if paths.staged_tables.exists():
+        shutil.rmtree(paths.staged_tables)
+
+
 def _publish_state_model_validation(
     run: Path,
     record: Mapping[str, object],
@@ -912,41 +990,62 @@ def _publish_state_model_validation(
     tables: Mapping[str, pl.DataFrame],
     validation_manifest: Mapping[str, object] | None,
 ) -> None:
-    """Replace `state_model_validation/`, then `promotion_record.json`, each only once it is whole.
+    """Replace `promotion_record.json` and `state_model_validation/` together, or not at all.
 
-    The last validation is its record and its tables, and nothing of it is touched until the new
-    one is written. The tables and their manifest go to a `.partial` sibling, `_replace_directory`
-    swaps it in, and the record goes last, through `_write_manifest`. A failure while staging
-    removes the staged directory and leaves the last validation as it was. The record carries the
-    digests of the tables it describes (`model_validation_hashes`), so a failure between the swap
-    and the record, which leaves new tables beside the last record, shows as a mismatch. A failed
-    gate publishes no tables and no manifest: the last validation's tables are replaced by none,
-    never left beside a not-beaten record.
+    BYTES FIRST, RENAMES LAST (Codex on #44). The last validation is its record and its tables,
+    and the order before this -- swap the tables in, delete the last ones, then write the record --
+    left the last record beside the new tables whenever the record's write failed, a full disk
+    above all. Now every byte is written before anything moves: the tables and their manifest to
+    `state_model_validation.partial/`, and the record, through `_stage_manifest`, to
+    `promotion_record.json.partial`, last. What follows is renames only: the last tables to
+    `.old`, the staged tables in, and the staged record over the last one. THAT RENAME IS THE
+    COMMIT: before it the last record stands, and `_settle_state_model_validation` puts its
+    tables back; after it the new record stands beside its own tables. `.old` is deleted only
+    then, and a failure deleting it costs nothing the next publish does not remove.
+
+    Any exception is raised as it was, once `_settle_state_model_validation` has left one whole
+    validation: the last, byte for byte, unless the record's rename ran, and the new one if it
+    did. A kill anywhere leaves leftovers that the next `validate-state-model` settles before it
+    reads anything. Until then, a kill between the first rename and the commit leaves the last
+    record beside new tables, or none, and nothing in this package reads `state_model_validation/`.
+    An interrupt after the commit exits non-zero with the new validation published. Nothing is
+    fsynced, so this is atomic against a process that dies, not a machine that does, and two
+    publishes on one run at once are not serialised: the second can stop on
+    `UnsettledPublishError`.
+
+    The record carries the digests of the tables it describes (`model_validation_hashes`). A
+    failed gate publishes no tables and no manifest: the last validation's tables are replaced by
+    none, never left beside a not-beaten record. The bytes are those the command always wrote:
+    nothing staged records its own path, and a rename keeps each file's sha256.
     """
+    import os
     import shutil
 
     from .build import write_parquet_deterministic
 
-    out = run / "state_model_validation"
-    staged = out.with_name(f"{out.name}.partial")
-    shutil.rmtree(staged, ignore_errors=True)
-    staged.mkdir(parents=True)
+    paths = _ValidationPaths.of(run)
+    _settle_state_model_validation(run)
     try:
+        paths.staged_tables.mkdir(parents=True)
         hashes = {
-            table: write_parquet_deterministic(frame, staged / f"{table}.parquet")
+            table: write_parquet_deterministic(frame, paths.staged_tables / f"{table}.parquet")
             for table, frame in tables.items()
         }
         if validation_manifest is not None:
             _write_manifest(
-                staged / "validation_manifest.json",
+                paths.staged_tables / "validation_manifest.json",
                 {**validation_manifest, "output_hashes": hashes},
             )
             record = {**record, "model_validation_hashes": hashes}
-        _replace_directory(staged, out)
+        staged_record = _stage_manifest(paths.record, record)
+        if paths.tables.exists():
+            os.replace(paths.tables, paths.old_tables)
+        os.replace(paths.staged_tables, paths.tables)
+        os.replace(staged_record, paths.record)
     except BaseException:
-        shutil.rmtree(staged, ignore_errors=True)
+        _settle_state_model_validation(run)
         raise
-    _write_manifest(run / "promotion_record.json", record)
+    shutil.rmtree(paths.old_tables, ignore_errors=True)
 
 
 @app.command("validate-state-model")
@@ -963,9 +1062,10 @@ def validate_state_model_command(
     manifest records (`_unfinished_fit`). A production fit that failed §11.14 is recorded as not
     beaten without running the harness. Otherwise the model is scored through
     `run_pseudo_suppression`'s own loop (`StateModelProducer`), which is 27 fits on D1. Its tables
-    go to `state_model_validation/` and the verdict to `promotion_record.json`, and nothing of the
-    last validation is touched until both are whole (`_publish_state_model_validation`). Both
-    verdicts exit 0, because "deploy the simpler method" is an outcome and not an error.
+    go to `state_model_validation/` and the verdict to `promotion_record.json`, both written in full
+    before either replaces the last, and the record's rename is the commit
+    (`_publish_state_model_validation`). Both verdicts exit 0, because "deploy the simpler method"
+    is an outcome and not an error.
     """
     import hashlib
     import json
@@ -991,6 +1091,11 @@ def validate_state_model_command(
     cfg = load_config(config)
     rid = run_id(cfg, _input_digests(cfg))
     run = run_dir(cfg, rid)
+    # A publish killed last time left its leftovers, and until they are settled the last record
+    # can stand beside new tables. Settled here, before any refusal below, so the next run of this
+    # command closes that window even when it scores nothing. It restores or finishes; it never
+    # removes the last validation.
+    _settle_state_model_validation(run)
     comparand = {
         table: run / f"{table}.parquet"
         for table in ("validation_scores", "validation_metrics", "validation_scoreboard")

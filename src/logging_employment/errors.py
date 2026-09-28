@@ -193,3 +193,14 @@ class ModelDiagnosticsError(LoggingEmploymentError):
     documented". This is the enforcement. Replicate fits inside §13's harness record their gate and
     do not raise; §13.10's convergence gate reads those reports instead.
     """
+
+
+class UnsettledPublishError(LoggingEmploymentError):
+    """A run directory holds leftovers of a state-model validation publish that no publish leaves.
+
+    `cli.py::_settle_state_model_validation` reads a publish's progress from its leftovers and
+    finishes or undoes it. One state it cannot read: a staged record with the last tables at
+    `.old` beside other tables. Renaming `.old` over them would be a guess, and `os.replace` onto
+    an empty directory succeeds without a word, so it is refused, naming both, for a human to
+    settle. Two publishes on one run at once can leave it; nothing else does.
+    """

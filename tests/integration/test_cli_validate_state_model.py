@@ -51,7 +51,11 @@ DAMAGE = {
     "summary_is_a_directory": {"unreadable": ["posterior_summary.parquet"]},
 }
 # What a `validate-state-model` that failed or was killed partway can leave beside the outputs.
-LEFTOVERS = ("state_model_validation.partial", "state_model_validation.old")
+LEFTOVERS = (
+    "state_model_validation.partial",
+    "state_model_validation.old",
+    "promotion_record.json.partial",
+)
 
 
 def _invoke(command: str, config: Path):
