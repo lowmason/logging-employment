@@ -20,7 +20,7 @@ from pathlib import Path
 
 import polars as pl
 
-from ..errors import UnsupportedReferenceYearError
+from ..errors import ClassificationContinuityError, UnsupportedReferenceYearError
 
 _CROSSWALK = Path(__file__).parent / "naics_113310.csv"
 
@@ -135,6 +135,8 @@ def crosswalk_113310() -> pl.DataFrame:
 def assert_113310_survives_the_window(frame: pl.DataFrame | None = None) -> None:
     """Raise unless 113310 is present, titled Logging, and unchanged across both vintages.
 
+    Every refusal is `ClassificationContinuityError`, naming what the crosswalk holds (`D-140`).
+
     Mechanical rather than string-continuity: §3.1 states outright that apparent code-string
     continuity is not a substitute for a versioned crosswalk test, so this reads the concordance
     and the structure files' change indicators rather than observing that "113310" appears twice.
@@ -149,20 +151,24 @@ def assert_113310_survives_the_window(frame: pl.DataFrame | None = None) -> None
     frame = crosswalk_113310() if frame is None else frame
     vintages = set(frame["vintage"].to_list())
     if vintages != {"2017", "2022"}:
-        raise ValueError(
+        raise ClassificationContinuityError(
             f"expected both window vintages in the crosswalk, found {sorted(vintages)}"
         )
     titles = set(frame["title"].to_list())
     if titles != {"Logging"}:
-        raise ValueError(f"113310's title is not stable across vintages: {sorted(titles)}")
+        raise ClassificationContinuityError(
+            f"113310's title is not stable across vintages: {sorted(titles)}"
+        )
     changed = frame.filter(
         pl.col("change_indicator").is_not_null() & (pl.col("change_indicator") != "")
     )
     if changed.height:
-        raise ValueError(
+        raise ClassificationContinuityError(
             f"113310 carries a non-empty change_indicator in {changed['vintage'].to_list()}; the "
             "structure file marks it as changed from the prior vintage"
         )
     link = frame.filter(pl.col("vintage") == "2017")["link_type_to_next"].to_list()
     if link != ["1:1"]:
-        raise ValueError(f"the 2017->2022 concordance does not pair 113310 one-to-one: {link}")
+        raise ClassificationContinuityError(
+            f"the 2017->2022 concordance does not pair 113310 one-to-one: {link}"
+        )

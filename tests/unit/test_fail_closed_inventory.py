@@ -48,8 +48,6 @@ KEEP: dict[str, str] = {
 # is complete, and deleted then.
 PENDING: dict[str, str] = {
     "baselines/runner.py::preferred_estimator": "Task 4",
-    "harmonize/bridge.py::bridge_frame": "Task 3",
-    "harmonize/naics.py::assert_113310_survives_the_window": "Task 3",
     "reconcile/scaling.py::Bounds.__post_init__": "Task 5",
     "store.py::assert_no_secret": "Task 5",
     "validate/regimes.py::select_targets": "Task 4",
