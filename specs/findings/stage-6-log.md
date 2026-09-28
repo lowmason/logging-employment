@@ -34,3 +34,15 @@ stage's `Gap closed:` rows (the gap table assigns it to Stage 3's layer and Stag
 so the discharged clause is removed rather than re-scoped to this stage's draws. Superseded reading:
 
 > every baseline estimate is checked against its per-cell bounds (INV-002's bounds half, unenforced since Stage 3);
+
+## 2026-09-28 — one clause that `D-119` made false
+
+`D-119`'s `/deferred` quick fix made `reconcile/integerize.py::integerize` raise
+`InfeasibleResidualError` on all three of its infeasibility refusals, so the last sentence of
+`RE-VALIDATED` (2) no longer held. Only that sentence changed. Superseded reading:
+
+> Its three infeasibility refusals are still plain `ValueError` (`D-119`).
+
+The Stage 3 `SHIPPED` point (6) still says a `lower` above an `upper` "raises `ValueError`". That
+block is frozen (rule 3), as the 2026-09-26 entry records for the same point, so it is left as
+written; this block is the live carrier.
