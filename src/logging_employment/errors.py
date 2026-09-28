@@ -1,7 +1,7 @@
 """Named fail-closed exceptions (§18.3).
 
 Each carries the offending value, so a caller's log line names what halted the run rather than
-only that something did.
+only that something did. `SecretInPayloadError` carries none: its value is the secret.
 """
 
 from __future__ import annotations
@@ -125,7 +125,13 @@ class UniverseClosureError(LoggingEmploymentError):
 
 
 class InfeasibleResidualError(LoggingEmploymentError):
-    """§12.3's summed bounds exclude the residual, so no feasible scaling exists.
+    """No in-bounds allocation met the total: the bounds exclude one, or the allocator missed it.
+
+    `reconcile.scaling.scale_into_bounds` raises it for §12.3's summed check, where lower bounds sum
+    past the residual or upper bounds fall short of it. It raises it too when its search for lambda
+    ends short of the residual: a bracket that never reaches it, which a pragma marks unreachable in
+    practice, or a bisection that stops outside `tolerance` of it, where the iteration cap can cut
+    the search short and an allocation may exist that it did not find.
 
     `reconcile.integerize` raises it for §12.6's three integer refusals (`D-119`): a lower bound
     above its cap, lower bounds summing past the total, and caps summing short of it. Each leaves no
@@ -136,6 +142,11 @@ class InfeasibleResidualError(LoggingEmploymentError):
     component before it writes a bound, so on a bounds file it wrote the shape is unreachable; it is
     named all the same because the bounds are read off a file, and a file is the run's own state
     (`D-140`).
+
+    `reconcile.allocate` raises it for a negative residual, since every allocation would then be
+    negative employment and §12.3's predicate refuses it, and `baselines.runner.release_integers`
+    raises it when `integerize`'s output does not sum to the required total: §12.6 step 5, kept as
+    defence in depth against a regression in `integerize`.
     """
 
 
@@ -270,10 +281,11 @@ class FallbackExhaustedError(LoggingEmploymentError):
     """No rung of §10.8's fallback hierarchy produced an estimate, so nothing can be preferred.
 
     `baselines/runner.py::preferred_estimator` raises it. Unreachable on D1 -- §10.2's inputs are
-    complete on every suppressed cell, so rung 4 always produces estimates -- but reachable from a
-    §13 mask that empties every month's missing set, which is why it is a raise rather than a
-    sentinel: a `baseline_manifest.json` recording `preferred_estimator: null` would read as a
-    considered choice, and `validate/scoreboard.py` ranks over what ran.
+    complete on every suppressed cell, so rung 4 always produces estimates -- but reachable from
+    `run-baselines`, `preferred_estimator`'s only caller, on staged tables where every month's
+    missing set is either empty or declined by every rung, which is why it is a raise rather than
+    a sentinel: a `baseline_manifest.json` recording `preferred_estimator: null` would read as a
+    considered choice.
     """
 
 
@@ -281,9 +293,11 @@ class SecretInPayloadError(LoggingEmploymentError):
     """A credential's value reached bytes bound for an artifact (§7.2, D3).
 
     `store.assert_no_secret` raises it before a `source_snapshot` row is recorded, scanning the
-    payload for every non-empty value of `config.SECRET_ENV_VARS`. It is the last of three guards:
-    `fetching._without_credentials` strips the `key` parameter before a response is recorded, and
-    `config.resolved_dict` keeps only an env var's NAME. This one catches a branch that forgot
-    either. Alone among the classes here it carries no offending value, because the value is the
-    secret.
+    payload for every non-empty value of `config.SECRET_ENV_VARS`. That payload is the row's
+    request URL and parameters, so this guard backs up only `fetching._without_credentials`, which
+    strips the `key` parameter before a response is recorded: a fetch branch that forgot to strip
+    the key is caught here. `config.resolved_dict` keeps only an env var's NAME, and its output is
+    not scanned: that guard holds only by never reading a value, so a secret-bearing `Config` field
+    would not be caught here. Alone among the classes here it carries no offending value, because
+    the value is the secret.
     """

@@ -18,10 +18,9 @@ def bridge_frame(rows: Sequence[dict[str, str]]) -> pl.DataFrame:
     belong in this table.
 
     A row missing a declared field raises `SchemaMismatchError` (`D-140`). Polars would render
-    the absent field as null, and a
-    bridge carrying a null `verification_status` or `uncertainty_treatment` states nothing about
-    whether the mapping was estimated or merely declared -- which is the one thing §8.6 asks a
-    bridge row to say.
+    the absent field as null, and a bridge carrying a null `verification_status` or
+    `uncertainty_treatment` states nothing about whether the mapping was estimated or merely
+    declared -- which is the one thing §8.6 asks a bridge row to say.
     """
     for index, row in enumerate(rows):
         missing = [field for field in BRIDGE_SCHEMA if field not in row]

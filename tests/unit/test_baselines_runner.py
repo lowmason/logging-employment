@@ -100,9 +100,10 @@ def test_the_preferred_estimator_follows_the_fallback_order(
 
 
 def test_a_run_where_no_rung_produced_an_estimate_is_refused_by_name() -> None:
-    """Reachable from a §13 mask that empties every month's missing set, never from D1. A raise
-    and not a sentinel, because `preferred_estimator: null` in `baseline_manifest.json` would
-    read as a considered choice: `FallbackExhaustedError` (`D-140`)."""
+    """Reachable from `run-baselines` on staged tables where every month's missing set is either
+    empty or declined by every rung, never from D1. A raise and not a sentinel, because
+    `preferred_estimator: null` in `baseline_manifest.json` would read as a considered choice:
+    `FallbackExhaustedError` (`D-140`)."""
     declined = pl.DataFrame(
         {
             "estimator_id": ["cbp_intensity", "equal_allocation"],

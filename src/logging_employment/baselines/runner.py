@@ -651,8 +651,9 @@ def preferred_estimator(results: pl.DataFrame) -> str:
 
     Raises `FallbackExhaustedError` when no rung ran (`D-140`). Unreachable on D1 -- §10.2's
     inputs are complete on every suppressed cell, so rung 4 always produces estimates -- but
-    reachable from a Stage 4 mask that empties every month's missing set, which is why it raises
-    rather than returning a sentinel.
+    reachable from `run-baselines`, its only caller, on staged tables where every month's missing
+    set is either empty or declined by every rung, which is why it raises rather than returning a
+    sentinel.
     """
     ran = set(
         results.filter(pl.col("reconciliation_status") == "anchored_and_reconciled")["estimator_id"]
