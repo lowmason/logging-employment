@@ -43,11 +43,6 @@ KEEP: dict[str, str] = {
     "reconcile/projection.py::_require_indicator_margins": "a caller-supplied indicator shape",
 }
 
-# Sites the sweep this test landed with converts, one task at a time. Each task removes its entry
-# first, sees this test name the site as unclassified, and then converts it. Empty when the sweep
-# is complete, and deleted then.
-PENDING: dict[str, str] = {}
-
 
 def _bare_value_error_sites() -> set[str]:
     """`<module>::<qualified function>` for every `raise ValueError(...)` under `src/`."""
@@ -79,9 +74,8 @@ def test_every_bare_value_error_is_a_callers_mistake_and_says_so() -> None:
     trigger it, or listed in `KEEP` with the reason it cannot. A stale entry is refused too, so
     the list describes the tree."""
     found = _bare_value_error_sites()
-    classified = set(KEEP) | set(PENDING)
-    unclassified = sorted(found - classified)
-    stale = sorted(classified - found)
+    unclassified = sorted(found - set(KEEP))
+    stale = sorted(set(KEEP) - found)
     assert not unclassified, (
         f"`raise ValueError` at {unclassified} is not classified. If data can trigger it, raise "
         "a named `errors.py` error (root CLAUDE.md, fail closed); if only a caller can, add it "
