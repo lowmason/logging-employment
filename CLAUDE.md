@@ -72,8 +72,8 @@ model tests (5 in `test_cli_state_model.py`, 5 in `test_cli_validate_state_model
 `test_state_total_recovery.py`) need no `data/`, only minutes of NUTS. Collected at plan 16's
 Task 14 without `data/`: a bare run is 1681 passed, 72 skipped; the hermetic tier 1661 passed, 45
 skipped, 47 deselected (27 data-bound, 20 slow model tests). Those counts are THIS MAC's: on
-ubuntu-latest one more test skips (1407 passed, 46 skipped, 27 deselected before plan 16, run
-34765933053), because
+ubuntu-latest one more test skips (1660 passed, 46 skipped, 47 deselected on plan 16's PR head
+`6768556`, run 36359326286), because
 `tests/audit/test_qcew_codes.py::test_period_basis_quotes_the_reference_verbatim_where_the_reference_is_readable`
 skips where the personal `~/.claude/skills/bls-data-context/` reference is absent (D-055). `uv sync
 --locked` installs JAX, NumPyro, ArviZ and h5netcdf there since plan 16, and the hermetic tier runs
