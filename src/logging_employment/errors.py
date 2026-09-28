@@ -55,7 +55,15 @@ class SourceFetchError(LoggingEmploymentError):
 
 
 class SchemaMismatchError(LoggingEmploymentError):
-    """A fetched file's columns do not match the schema the parser declares."""
+    """A file's columns, or a row bound for a persisted table, do not match the declared schema.
+
+    The parsers raise it for a fetched file whose columns are not the ones they declare;
+    `ingest/qcew_size.py::read_by_size_zip` for a by-size archive that does not hold exactly one
+    CSV, so there is no file to read the columns of; and `harmonize/bridge.py::bridge_frame` for a
+    §8.6 bridge row missing a declared field, which Polars would otherwise persist as a null
+    `verification_status` or `uncertainty_treatment` -- the one thing §8.6 asks a bridge row to
+    say. Each carries the offending value: the columns, the members, or the fields (`D-140`).
+    """
 
 
 class MissingCrossTabulationError(LoggingEmploymentError):
@@ -121,7 +129,13 @@ class InfeasibleResidualError(LoggingEmploymentError):
 
     `reconcile.integerize` raises it for §12.6's three integer refusals (`D-119`): a lower bound
     above its cap, lower bounds summing past the total, and caps summing short of it. Each leaves no
-    integer allocation inside the bounds that sums to the total (`D-139`).
+    integer allocation inside the bounds that sums to the total (`D-139`). `reconcile.scaling.Bounds`
+    raises it one layer earlier, as it is built from `deterministic_bounds`, for a cell whose lower
+    bound sits above its upper bound (`D-096`): the same "lower above its cap" shape, refused before
+    either clipping site can settle it in the cap's favour. `solve-bounds` refuses an infeasible
+    component before it writes a bound, so on a bounds file it wrote the shape is unreachable; it is
+    named all the same because the bounds are read off a file, and a file is the run's own state
+    (`D-140`).
     """
 
 
@@ -236,4 +250,40 @@ class StoredObjectMismatchError(LoggingEmploymentError):
     existing object before trusting it; this is the refusal, naming the path, the digest found and
     the digest claimed. The remedy is to remove the object and fetch again. Nothing repairs it in
     place, because the store's promise is that a stored object is never rewritten.
+    """
+
+
+class ClassificationContinuityError(LoggingEmploymentError):
+    """113310 does not survive the D1 window's two NAICS vintages unchanged (§3.1, `D-102`).
+
+    `harmonize/naics.py::assert_113310_survives_the_window` raises it for any of its four premises:
+    a window vintage missing from the vendored crosswalk, a title other than Logging, a non-empty
+    structure-file change indicator, or a 2017 -> 2022 link that is not one-to-one. §3.1: "The ETL
+    MUST verify the 113310 mapping mechanically", and `build.build_harmonized` runs the check
+    before it writes a table, so a re-vendored crosswalk halts the build by name. Distinct from
+    `UnsupportedReferenceYearError`, which refuses a YEAR outside the vintages this package
+    handles; this refuses the CROSSWALK for the years it does.
+    """
+
+
+class FallbackExhaustedError(LoggingEmploymentError):
+    """No rung of §10.8's fallback hierarchy produced an estimate, so nothing can be preferred.
+
+    `baselines/runner.py::preferred_estimator` raises it. Unreachable on D1 -- §10.2's inputs are
+    complete on every suppressed cell, so rung 4 always produces estimates -- but reachable from a
+    §13 mask that empties every month's missing set, which is why it is a raise rather than a
+    sentinel: a `baseline_manifest.json` recording `preferred_estimator: null` would read as a
+    considered choice, and `validate/scoreboard.py` ranks over what ran.
+    """
+
+
+class SecretInPayloadError(LoggingEmploymentError):
+    """A credential's value reached bytes bound for an artifact (§7.2, D3).
+
+    `store.assert_no_secret` raises it before a `source_snapshot` row is recorded, scanning the
+    payload for every non-empty value of `config.SECRET_ENV_VARS`. It is the last of three guards:
+    `fetching._without_credentials` strips the `key` parameter before a response is recorded, and
+    `config.resolved_dict` keeps only an env var's NAME. This one catches a branch that forgot
+    either. Alone among the classes here it carries no offending value, because the value is the
+    secret.
     """

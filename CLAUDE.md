@@ -175,8 +175,14 @@ in `runs/<run_id>/` beside one JSON manifest per command.
   frame the same way. `fetching.write_source_manifest` repeats the write policy inline but
   sorts on `["source_id", "snapshot_id"]` only.
 - **Fail closed with a named error.** Everything in `errors.py` subclasses `LoggingEmploymentError`
-  and carries the offending value. Some classes and guards are *deliberately unraised/uncalled* and
-  say so (`NoHarvestFactorError`, both guards in `harmonize/concepts.py`): later stages own them.
+  and carries the offending value. WHICH refusals (ruled 2026-09-28, `D-140`): any refusal data can
+  trigger -- source bytes, fetched metadata, staged tables, or the run's own state (§18.3) -- raises
+  a named `errors.py` error. A bare `ValueError` is for a caller misusing the API, and it stays in
+  pydantic validators, which turn only `ValueError` and `AssertionError` into a `ValidationError`.
+  `tests/unit/test_fail_closed_inventory.py` lists every bare `ValueError` under `src/` with the
+  reason it is a caller's mistake, and refuses a new one until it is classified. Some classes and
+  guards are *deliberately unraised/uncalled* and say so (`NoHarvestFactorError`, both guards in
+  `harmonize/concepts.py`): later stages own them.
 - **Secrets never reach an artifact** (D3, §7.2): `store.assert_no_secret` refuses a
   snapshot row containing one of `config.SECRET_ENV_VARS`, `fetching._without_credentials` strips
   the `key` param before recording, and `resolved_dict` keeps only the env var's *name*.
