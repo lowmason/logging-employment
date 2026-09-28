@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import typer
 
 from .config import load_config
+from .runs import partial_path as _partial
 
 if TYPE_CHECKING:  # annotations only; keeps CLI start-up cheap
     from collections.abc import Iterator, Mapping
@@ -103,15 +104,6 @@ def _constraints_dir(cfg: Config) -> Path:
     return Path(cfg.storage.constraints_uri)
 
 
-def _partial(path: Path) -> Path:
-    """The sibling a file or directory is written to before it is renamed over `path`.
-
-    One name for every such sibling, so the manifest writer, the staged promotion record and the
-    staged validation tables agree on what an unfinished write looks like. No reader opens one.
-    """
-    return path.with_name(f"{path.name}.partial")
-
-
 def _stage_manifest(path: Path, payload: Mapping[str, object]) -> Path:
     """Write the bytes `_write_manifest` puts at `path` to its `.partial` sibling, and return it.
 
@@ -198,7 +190,7 @@ def build_constraints_command(
         HarmonizedData,
         schema_fingerprint,
     )
-    from .runs import run_dir, run_id
+    from .runs import replace_whole, run_dir, run_id
 
     cfg = load_config(config)
     data = HarmonizedData.load(Path(cfg.storage.staged_uri))
@@ -215,7 +207,10 @@ def build_constraints_command(
 
     run = run_dir(cfg, run_id(cfg, _input_digests(cfg)))
     run.mkdir(parents=True, exist_ok=True)
-    (run / "config.resolved.yaml").write_text(yaml.safe_dump(resolved_dict(cfg), sort_keys=True))
+    # Replaced whole (`D-134`): `write_text` truncates first, so a kill or a full disk mid-write
+    # left the resolved config cut short in a directory whose manifests are never partial.
+    with replace_whole(run / "config.resolved.yaml") as partial:
+        partial.write_text(yaml.safe_dump(resolved_dict(cfg), sort_keys=True))
     _write_manifest(
         run / "schema_manifest.json",
         {

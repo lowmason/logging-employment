@@ -2749,7 +2749,7 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       Size: plan. Done when: each command either publishes bytes first with one commit point, as
       `cli.py::_publish_state_model_validation` does, or each reader refuses a mix by the digests its
       writer's manifest records, and a kill test per command shows no mix is ever read as a run.
-- [ ] `D-134` **`RawStore.put`, `write_source_manifest` and `config.resolved.yaml` are written in place,
+- [x] `D-134` **`RawStore.put`, `write_source_manifest` and `config.resolved.yaml` are written in place,
       so an interrupted write leaves the file cut short.** The worst is `store.py::RawStore.put`. The
       store is content-addressed and written once, and `put` calls `write_bytes` on the object's final
       path. A kill mid-write leaves a truncated object whose path claims a digest its bytes do not
@@ -2762,6 +2762,15 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       Size: quick-fix. Done when: each writes a `.partial` sibling and renames it, as
       `cli.py::_write_manifest` does, `put` refuses an existing object whose bytes are not its digest,
       and a test interrupts each write and finds the last file whole or none.
+      → done 2026-09-28 (/deferred quick fix): `runs.replace_whole` yields a `.partial` sibling and
+      renames it over the path on a clean exit, and `RawStore.put`, `fetching.write_source_manifest`
+      and `build-constraints`' `config.resolved.yaml` write through it; `put` hashes an existing
+      object and refuses one whose bytes are not its digest with the new
+      `errors.StoredObjectMismatchError`, leaving it in place. One test per write interrupts it
+      partway and finds the last file whole, or none, and no sibling (`tests/unit/test_store.py`,
+      `tests/unit/test_fetching.py`, `tests/integration/test_constraint_cli.py`); the helper's own
+      tests are in `tests/unit/test_runs.py`, with one pinning that `cli._partial` names siblings the
+      same way.
 - [ ] `D-135` **`reconcile` verifies whatever `baseline_results.parquet` it finds, and hashes it in a
       second read.** `cli.py::reconcile_command` checks only that the file exists. It compares neither
       its digest with `baseline_manifest.json`'s `output_hashes` nor its `constraint_set_hash` column

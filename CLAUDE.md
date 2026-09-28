@@ -125,8 +125,8 @@ in `runs/<run_id>/` beside one JSON manifest per command.
 | `contracts.py` | every persisted table's polars schema (§7), schema fingerprints, closed value sets |
 | `build.py` | `build-harmonized` + the deterministic Parquet writer; reads stored bytes, never fetches |
 | `fetching.py` | acquisition per source, `source_snapshot` rows, `runs/source_manifest.parquet` |
-| `store.py` | `data/raw/<source_id>/<sha256>/<file>`, written once; the secret guard |
-| `runs.py` | `runs/<run_id>/` and how the id is derived |
+| `store.py` | `data/raw/<source_id>/<sha256>/<file>`, written once and whole, refused if an existing object's bytes are not its digest; the secret guard |
+| `runs.py` | `runs/<run_id>/` and how the id is derived; `replace_whole`, the `.partial`-then-rename every single-file writer outside `cli.py` goes through (`D-134`) |
 | `errors.py` | the fail-closed exception hierarchy (§18.3) |
 | `classification.py`, `constants.py` | §3.1's memo read out of the spec file rather than retyped; the D1 window, `113310`, ownership `5`, states+DC FIPS, measured QCEW code sets |
 | `ingest/` | one module per source + the shared `HttpFetcher` → see `ingest/CLAUDE.md` |

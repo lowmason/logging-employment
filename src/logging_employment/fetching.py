@@ -24,6 +24,7 @@ from .errors import SourceFetchError
 from .harmonize.naics import vintage_for_year
 from .ingest import cbp, qcew, qcew_size
 from .ingest.base import FetchedBytes, HttpFetcher
+from .runs import replace_whole
 from .store import RawStore, snapshot_row
 
 KNOWN_SOURCES = ("qcew", "qcew_parent", "qcew_size", "cbp")
@@ -98,13 +99,20 @@ def write_source_manifest(rows: Sequence[dict[str, object]], path: Path) -> str:
 
     Sorted before writing, so a manifest does not depend on the order the fetch loop happened to
     visit its sources in -- the same run recorded twice is the same file.
+
+    Replaced whole (`D-134`): `write_parquet` truncates before it writes, and this file is how
+    `build.snapshot_paths` resolves CBP's ambiguous snapshots, so a manifest cut short by a kill or
+    a full disk cost the record of which snapshots a run used, though the stored bytes remained.
+    The frame goes to a `.partial` sibling and is renamed over the manifest (`runs.replace_whole`).
     """
     frame = pl.DataFrame(list(rows), schema=SOURCE_SNAPSHOT_SCHEMA, orient="row").sort(
         ["source_id", "snapshot_id"]
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    frame.rechunk().write_parquet(path, compression="uncompressed", statistics=False)
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    with replace_whole(path) as partial:
+        frame.rechunk().write_parquet(partial, compression="uncompressed", statistics=False)
+        digest = hashlib.sha256(partial.read_bytes()).hexdigest()
+    return digest
 
 
 def _without_credentials(fetched: FetchedBytes) -> FetchedBytes:

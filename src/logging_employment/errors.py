@@ -224,3 +224,16 @@ class RunInUseError(LoggingEmploymentError):
     publish, and a second invocation is refused with this before it touches anything. The kernel
     releases the lock when its holder exits, killed or not, so no crash leaves the run locked.
     """
+
+
+class StoredObjectMismatchError(LoggingEmploymentError):
+    """A raw-store object's bytes do not hash to the digest its path claims (§6.2, `D-134`).
+
+    `store.RawStore.put` addresses every object by its content's sha256 and writes it once, so an
+    object that exists was taken as the bytes its path names. `write_bytes` truncates before it
+    writes, so a kill or a full disk mid-write left one cut short, and every later `put` of the
+    same response left it alone and reported it present. `put` now writes whole and hashes an
+    existing object before trusting it; this is the refusal, naming the path, the digest found and
+    the digest claimed. The remedy is to remove the object and fetch again. Nothing repairs it in
+    place, because the store's promise is that a stored object is never rewritten.
+    """

@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
+import os
 from pathlib import Path
 
+import pytest
+
 from logging_employment.config import Config, resolved_dict
-from logging_employment.runs import RUN_ID_LENGTH, code_provenance, run_id
+from logging_employment.runs import (
+    RUN_ID_LENGTH,
+    code_provenance,
+    partial_path,
+    replace_whole,
+    run_id,
+)
 
 DIGESTS = {"qcew_monthly": "aa" * 32, "bridge": "bb" * 32}
 
@@ -108,3 +118,58 @@ def test_no_code_stamp_reaches_the_payload_the_run_id_hashes(appendix_a_config: 
     assert not set(code_provenance()) & set(json.loads(payload)["config"])
     assert "code_commit" not in payload
     assert "uv_lock_sha256" not in payload
+
+
+def test_replace_whole_leaves_the_last_file_when_the_write_fails_partway(tmp_path: Path) -> None:
+    """`D-134`. `write_bytes`, `write_text` and `write_parquet` truncate before they write, so a
+    full disk or a kill mid-write left the file cut short where readers look. The write goes to
+    the `.partial` sibling, and a write that raises leaves the last file as it was and removes
+    the sibling."""
+    path = tmp_path / "source_manifest.parquet"
+    path.write_bytes(b"the last manifest")
+    with pytest.raises(OSError, match="No space left"), replace_whole(path) as partial:
+        partial.write_bytes(b"half of the")
+        raise OSError(errno.ENOSPC, "No space left on device")
+    assert path.read_bytes() == b"the last manifest"
+    assert [child.name for child in tmp_path.iterdir()] == [path.name]
+
+
+def test_replace_whole_makes_nothing_visible_until_the_rename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rename is the only step that makes the file visible. Interrupted before it, a file
+    written for the first time does not exist at all, and its sibling is removed."""
+    path = tmp_path / "config.resolved.yaml"
+
+    def interrupted(*args: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "replace", interrupted)
+    with pytest.raises(KeyboardInterrupt), replace_whole(path) as partial:
+        partial.write_text("project: {}")
+    monkeypatch.undo()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_replace_whole_renames_the_sibling_over_the_path(tmp_path: Path) -> None:
+    path = tmp_path / "object.csv"
+    path.write_bytes(b"the last object")
+    with replace_whole(path) as partial:
+        assert partial == partial_path(path) == tmp_path / "object.csv.partial"
+        partial.write_bytes(b"the new object")
+    assert path.read_bytes() == b"the new object"
+    assert [child.name for child in tmp_path.iterdir()] == [path.name]
+
+
+def test_the_partial_sibling_has_one_name_across_the_package() -> None:
+    """One name for every unfinished write, so no reader anywhere opens one: the manifest writer,
+    the staged promotion record and the staged validation tables in `cli.py` name theirs through
+    `runs.partial_path` too."""
+    from logging_employment.cli import _partial
+
+    assert _partial(Path("runs/x/promotion_record.json")) == partial_path(
+        Path("runs/x/promotion_record.json")
+    )
+    assert partial_path(Path("runs/x/state_model_validation")) == Path(
+        "runs/x/state_model_validation.partial"
+    )
