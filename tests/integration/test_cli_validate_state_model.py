@@ -18,6 +18,7 @@ import pytest
 from typer.testing import CliRunner
 
 from logging_employment.cli import app
+from logging_employment.models.interfaces import STORE_PATH
 
 SMALL_SAMPLER = {"chains": 2, "warmup": 60, "draws": 60}
 LOOSE_GATE = {
@@ -30,6 +31,15 @@ LOOSE_GATE = {
 }
 FIXTURE_VALIDATION = {"replicates_per_regime": 3, "pseudo_suppression_seeds": [1024]}
 COMPARAND_TABLES = ("validation_scores", "validation_metrics", "validation_scoreboard")
+# What a passing fit writes after its report (`cli.py::fit_state_model_command`), and how far an
+# interrupted one got: each case is what it had written after its passing report.
+FIT_ARTIFACTS = (STORE_PATH, "posterior_summary.parquet", "state_model_manifest.json")
+INTERRUPTIONS = {
+    "in_the_store": (),
+    "before_the_summary": (STORE_PATH,),
+    "before_the_manifest": (STORE_PATH, "posterior_summary.parquet"),
+    "store_deleted_later": ("posterior_summary.parquet", "state_model_manifest.json"),
+}
 
 
 def _invoke(command: str, config: Path):
@@ -177,3 +187,55 @@ def test_a_fit_from_another_constraint_set_is_refused_before_anything_is_deleted
     assert "stale0hash" in result.output
     assert "fit-state-model" in result.output
     assert all(path.read_text() == "from an earlier validation" for path in earlier)
+
+
+@pytest.mark.parametrize("written", list(INTERRUPTIONS.values()), ids=list(INTERRUPTIONS))
+def test_an_unfinished_fit_is_refused_before_anything_is_deleted(make_staged_repo, written) -> None:
+    """Codex on #41. `fit-state-model` writes its passing report first, so a fit interrupted after
+    it leaves `"passed": true` beside artifacts that were never written. The command deleted the last
+    record and only then failed to read the store, losing a validation of 27 fits. It must refuse
+    first, naming what is missing. The comparand and whatever the fit did write are planted as
+    text, since a refusal reads neither."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    for table in COMPARAND_TABLES:
+        (run / f"{table}.parquet").write_text("a comparand")
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    (run / "posterior").mkdir()
+    report = {"passed": True, "failures": [], "constraint_set_hash": current}
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    for artifact in written:
+        (run / artifact).write_text("from the interrupted fit")
+    earlier = (
+        run / "promotion_record.json",
+        run / "state_model_validation" / "validation_manifest.json",
+    )
+    for path in earlier:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("from an earlier validation")
+    result = _invoke("validate-state-model", repo.config_path)
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit), result.exception
+    # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps the message.
+    assert "fit-state-model" in result.output
+    for artifact in FIT_ARTIFACTS:
+        assert (Path(artifact).name in result.output) is (artifact not in written), artifact
+    assert all(path.read_text() == "from an earlier validation" for path in earlier)
+
+
+def test_a_failed_fits_report_alone_is_written_up_as_not_beaten(make_staged_repo) -> None:
+    """A failed gate writes its report and nothing else, by design, so the report alone is not an
+    unfinished fit: the command records the model as not beaten without a store (Decision 9)."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    for table in COMPARAND_TABLES:
+        (run / f"{table}.parquet").write_text("a comparand")
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    (run / "posterior").mkdir()
+    report = {"passed": False, "failures": ["parameter_rhat_max"], "constraint_set_hash": current}
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    result = _invoke("validate-state-model", repo.config_path)
+    assert result.exit_code == 0, result.output
+    record = json.loads((run / "promotion_record.json").read_text())
+    assert record["verdict"] == "not_beaten"
+    assert record["gates"]["convergence"]["production_failures"] == ["parameter_rhat_max"]

@@ -52,7 +52,10 @@ command list — four of §16.1's fifteen do not exist yet (`fit-size-model`, `d
 `posterior/diagnostics.json`. The two commands that read a fit, `reconcile` and
 `validate-state-model`, refuse one whose `diagnostics.json` names another `constraint_set_hash`
 (`cli.py::_stale_fit`): a fit outlives its constraint set whenever `build-constraints` re-runs
-without a re-fit, and its draws would re-verify clean against their own bounds.
+without a re-fit, and its draws would re-verify clean against their own bounds. They also refuse,
+unread, a fit whose report records a pass while its store, `posterior_summary.parquet` or
+`state_model_manifest.json` is missing (`cli.py::_unfinished_fit`): the report is written first, so
+an interrupted fit leaves a pass beside draws that were never written.
 
 Markers are declared but never applied by `addopts`: `slow` is on one unit test and EIGHT
 integration modules (seventeen `mark.slow` sites since plan 16, which added the three model
@@ -69,8 +72,8 @@ model tests (5 in `test_cli_state_model.py`, 5 in `test_cli_validate_state_model
 `test_state_total_recovery.py`) need no `data/`, only minutes of NUTS. Collected at plan 16's
 Task 14 without `data/`: a bare run is 1681 passed, 72 skipped; the hermetic tier 1661 passed, 45
 skipped, 47 deselected (27 data-bound, 20 slow model tests). Those counts are THIS MAC's: on
-ubuntu-latest one more test skips (1407 passed, 46 skipped, 27 deselected before plan 16, run
-34765933053), because
+ubuntu-latest one more test skips (1660 passed, 46 skipped, 47 deselected on plan 16's PR head
+`6768556`, run 36359326286), because
 `tests/audit/test_qcew_codes.py::test_period_basis_quotes_the_reference_verbatim_where_the_reference_is_readable`
 skips where the personal `~/.claude/skills/bls-data-context/` reference is absent (D-055). `uv sync
 --locked` installs JAX, NumPyro, ArviZ and h5netcdf there since plan 16, and the hermetic tier runs

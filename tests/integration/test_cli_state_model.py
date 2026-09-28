@@ -36,6 +36,15 @@ LOOSE_GATE = {
 }
 # No R-hat is below 0.5, so this gate fails every fit, deterministically.
 FAILING_GATE = {"diagnostics": {"max_rhat": 0.5}}
+# What a passing fit writes after its report (`cli.py::fit_state_model_command`), and how far an
+# interrupted one got: each case is what it had written after its passing report.
+FIT_ARTIFACTS = (STORE_PATH, "posterior_summary.parquet", "state_model_manifest.json")
+INTERRUPTIONS = {
+    "in_the_store": (),
+    "before_the_summary": (STORE_PATH,),
+    "before_the_manifest": (STORE_PATH, "posterior_summary.parquet"),
+    "store_deleted_later": ("posterior_summary.parquet", "state_model_manifest.json"),
+}
 
 
 def _invoke(command: str, config: Path):
@@ -196,6 +205,50 @@ def test_reconcile_fails_a_fit_from_another_constraint_set_without_reading_it(
         "constraint_set_hash": current,
         "passed": False,
     }
+
+
+@pytest.mark.parametrize("written", list(INTERRUPTIONS.values()), ids=list(INTERRUPTIONS))
+def test_reconcile_fails_an_unfinished_fit_without_reading_it(staged_repo, written) -> None:
+    """Codex on #41. `fit-state-model` writes its passing report first, so a fit interrupted after
+    it leaves `"passed": true` beside artifacts that were never written. `reconcile` keyed on the
+    store alone: with no store it read the run as having no fit, and with one it read the store
+    whatever else was missing. It fails the fit unread instead, naming what is missing. What the
+    fit did write is planted as text, so reading it would crash, not record."""
+    result = _invoke("run-baselines", staged_repo.config_path)
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    (run / "posterior").mkdir(parents=True, exist_ok=True)
+    report = {"passed": True, "constraint_set_hash": current}
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    for artifact in written:
+        (run / artifact).write_text("from the interrupted fit")
+    result = _invoke("reconcile", staged_repo.config_path)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert "fit-state-model" in result.output
+    manifest = json.loads((run / "reconcile_manifest.json").read_text())
+    assert manifest["within_tolerance"] is True
+    assert manifest["state_model"] == {
+        "missing": [artifact for artifact in FIT_ARTIFACTS if artifact not in written],
+        "passed": False,
+    }
+
+
+def test_a_failed_fits_report_alone_is_not_an_unfinished_fit(staged_repo) -> None:
+    """A failed gate writes its report and nothing else, by design (`fit-state-model`'s
+    docstring), so `reconcile` has no draws to re-check and writes the keys it always wrote."""
+    result = _invoke("run-baselines", staged_repo.config_path)
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    (run / "posterior").mkdir(parents=True, exist_ok=True)
+    report = {"passed": False, "failures": ["parameter_rhat_max"], "constraint_set_hash": current}
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    result = _invoke("reconcile", staged_repo.config_path)
+    assert result.exit_code == 0, result.output
+    manifest = json.loads((run / "reconcile_manifest.json").read_text())
+    assert "state_model" not in manifest
 
 
 def test_the_cli_starts_without_a_ppl() -> None:
