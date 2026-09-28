@@ -89,7 +89,9 @@ def discover_naics_predicate(variables_json: dict) -> str:
     names = [n for n in variables_json.get("variables", {}) if n.startswith("NAICS")]
     predicates = [n for n in names if not n.endswith("_LABEL")]
     if len(predicates) != 1:
-        raise ValueError(f"expected exactly one NAICS predicate in the metadata, found {names}")
+        raise SchemaMismatchError(
+            f"expected exactly one NAICS predicate in the metadata, found {names}"
+        )
     return predicates[0]
 
 

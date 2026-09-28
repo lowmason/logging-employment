@@ -2328,7 +2328,7 @@ review and from fixing it.
       Size: design. Done when: a zero-truth target either passes the tripwire (the placeholder `"0"`
       exempted where a real suppression publishes it) or is excluded by the selectors with the reason
       recorded, and a harness-level test reaches step 6 without disabling the guard.
-- [ ] `D-119` **Plain `ValueError` refusals remain on paths plan 15 made reachable.**
+- [x] `D-119` **Plain `ValueError` refusals remain on paths plan 15 made reachable.**
       `reconcile/integerize.py::integerize` raises `ValueError` on three infeasibility conditions (a floor
       above its cap, a base above the total, an unplaced remainder). Under finite bounds these are newly
       reachable from `baselines/runner.py`'s integer release. `ingest/cbp.py::discover_naics_predicate`
@@ -2339,6 +2339,17 @@ review and from fixing it.
       Size: quick-fix. Done when: those refusals raise named errors (`InfeasibleResidualError` for
       `integerize`, `SchemaMismatchError` for `discover_naics_predicate`), and their tests and the table
       say so.
+      **→ done 2026-09-28 (/deferred quick fix).** `integerize`'s three refusals raise
+      `InfeasibleResidualError` and `discover_naics_predicate`'s raises `SchemaMismatchError`, each
+      message unchanged. Five tests failed first on the bare `ValueError` and pass now, each pinned to
+      its arm by `match=`: `test_integerize.py`'s `test_a_total_below_the_summed_lower_bounds_raises`,
+      `test_a_contradictory_bound_pair_is_refused` and the new
+      `test_a_remainder_the_caps_cannot_absorb_is_refused_by_name` (the unplaced-remainder arm, which
+      no test reached before), and `test_cbp.py`'s
+      `test_ambiguous_metadata_fails_closed_rather_than_picking_one` and the new
+      `test_metadata_serving_only_a_label_has_no_predicate_and_fails_closed`. The table gains a
+      `discover_naics_predicate` row; the four `ValueError`s it already listed are not this item's and
+      are unchanged.
 
 ## /deferred owners — 2026-09-26
 

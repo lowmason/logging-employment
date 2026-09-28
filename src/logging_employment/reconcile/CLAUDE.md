@@ -130,6 +130,8 @@ The load-bearing points:
   `integerize({"04": 1.5, "01": 1.5}, total=3)` → `{"04": 1, "01": 2}`. Bounds are read per *cell
   that has a value*, never by iterating `upper` (a cap for an absent cell used to create a phantom
   entry), and the placement budget is computed once before the loop (`integerize.py::integerize`).
+  All three refusals — a floor above its cap, floors past the total, a remainder the caps cannot
+  absorb — raise `InfeasibleResidualError` (`D-119`), never a bare `ValueError`.
 - **`reconcile_draws` never reduces the draw axis** (§12.7): negative dependence lives only in the
   joint object. A negative draw raises `WeightDomainError`; only a *zero* seed is floored — §12.4's
   floor covers zero, not sign.

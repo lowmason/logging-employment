@@ -6,6 +6,7 @@ import math
 
 import pytest
 
+from logging_employment.errors import InfeasibleResidualError
 from logging_employment.reconcile.integerize import integerize
 
 
@@ -46,7 +47,8 @@ def test_integer_lower_and_upper_bounds_are_respected() -> None:
 
 def test_a_lower_bound_seats_a_cell_its_raw_value_would_round_below() -> None:
     """The test above is named for lower AND upper bounds and passes no `lower=` at all, so the
-    seat floor at integerize.py:67 was pinned by nothing: dropping it leaves every unit test green.
+    seat floor (`integerize`'s `max(math.floor(value), lower.get(cell, 0))`) was pinned by nothing:
+    dropping it leaves every unit test green.
     Both results here sum to 11, so a totals-only assertion cannot tell them apart -- the point is
     WHICH cell holds the units, not how many were placed. Unfloored, "01" comes back at 1, below
     the lower bound its caller declared."""
@@ -64,8 +66,16 @@ def test_an_empty_input_returns_empty() -> None:
 
 
 def test_a_total_below_the_summed_lower_bounds_raises() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(InfeasibleResidualError, match="2 exceed the required total 1"):
         integerize({"01": 1.0, "02": 1.0}, total=1, lower={"01": 1, "02": 1})
+
+
+def test_a_remainder_the_caps_cannot_absorb_is_refused_by_name() -> None:
+    """The floors fit the total, so the base check passes; the caps then leave room for one unit of
+    the four still to place. The third of `integerize`'s refusals, and until D-119 the only one no
+    test reached."""
+    with pytest.raises(InfeasibleResidualError, match=r"3 unit\(s\) could not be placed"):
+        integerize({"a": 1.0}, total=5, upper={"a": 2})
 
 
 def test_a_capped_cell_does_not_starve_an_uncapped_one() -> None:
@@ -116,7 +126,7 @@ def test_a_contradictory_bound_pair_is_refused() -> None:
     declared. D1 has `lower=0, upper=None` throughout, so this is latent here and live in
     Stage 6, which supplies real class bands.
     """
-    with pytest.raises(ValueError, match="lower bound"):
+    with pytest.raises(InfeasibleResidualError, match="lower bound 5 above its upper bound 3"):
         integerize({"a": 4.0}, 3, lower={"a": 5}, upper={"a": 3})
 
 

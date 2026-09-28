@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import math
 
+from ..errors import InfeasibleResidualError
+
 
 def integerize(
     values: dict[str, float],
@@ -40,7 +42,18 @@ def integerize(
     lower: dict[str, int] | None = None,
     upper: dict[str, int | None] | None = None,
 ) -> dict[str, int]:
-    """Round `values` to integers summing exactly to `total`, respecting integer bounds."""
+    """Round `values` to integers summing exactly to `total`, respecting integer bounds.
+
+    Every refusal is `InfeasibleResidualError`, the integer half of the question §12.3's scaling
+    answers for floats, but the three do not prove the same thing. A `lower` above an `upper` and a
+    remainder the caps cannot absorb each leave no integer allocation inside the bounds that sums
+    to `total`. The first is not only a caller's slip: `baselines.runner.integer_bounds` cuts a
+    float interval holding no integer, such as [41.2, 41.9], to a lower of 42 and an upper of 41.
+    The base check proves less. It refuses when the seats -- each cell's floor, raised to its lower
+    bound -- sum past `total`, and a floor is not a bound: `{"a": 1.01, "b": 1.01, "c": 5.98}` at
+    `total=8` with `lower={"a": 2, "b": 2}` seats 2, 2 and 5 and is refused, though 2, 2 and 4
+    satisfies every bound.
+    """
     if not values:
         return {}
     lower = lower or {}
@@ -56,7 +69,7 @@ def integerize(
         floor_bound = lower.get(cell, 0)
         cap = upper.get(cell)
         if cap is not None and floor_bound > cap:
-            raise ValueError(
+            raise InfeasibleResidualError(
                 f"cell {cell!r} has lower bound {floor_bound} above its upper bound {cap}; "
                 "§12.6 cannot round into a contradictory pair, and clamping to the cap would "
                 "silently return a value below the lower bound the caller declared"
@@ -70,7 +83,7 @@ def integerize(
 
     base = sum(floors.values())
     if base > total:
-        raise ValueError(
+        raise InfeasibleResidualError(
             f"summed integer lower bounds {base} exceed the required total {total}; "
             "§12.6 cannot round into an infeasible margin"
         )
@@ -99,7 +112,7 @@ def integerize(
             remaining -= 1
         index += 1
     if remaining > 0:
-        raise ValueError(
+        raise InfeasibleResidualError(
             f"{remaining} unit(s) could not be placed without breaching an integer upper bound"
         )
     return out
