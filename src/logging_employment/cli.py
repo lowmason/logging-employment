@@ -538,14 +538,22 @@ def _stale_fit(run: Path) -> dict[str, str | None] | None:
 
     The fit's hash is `posterior/diagnostics.json`'s. Every fit writes that report first, gate
     passed or not, into the `posterior/` it emptied, so the report and the store come from one fit,
-    and reading it needs no netCDF reader. An absent report or key is `None`, which matches
-    nothing: an unrecorded fit is refused, never trusted.
+    and reading it needs no netCDF reader. A report that is absent, cannot be read, does not parse
+    to an object or lacks the key is `None`, which matches nothing: an unrecorded fit is refused,
+    never trusted, and never raised past the caller (Codex on #43), so `reconcile` still writes its
+    verdict. This runs first in `validate-state-model`, and in `reconcile` whenever a store exists,
+    so a report that cannot be read is refused here as stale. `_unfinished_fit` names the same
+    report `unreadable` only in a `reconcile` without a store.
     """
     import json
 
     def recorded(path: Path) -> str | None:
-        """The `constraint_set_hash` a JSON artifact records, or `None` without the file or key."""
-        return json.loads(path.read_text()).get("constraint_set_hash") if path.exists() else None
+        """The `constraint_set_hash` a JSON artifact records, or `None` when it records none."""
+        try:
+            document = json.loads(path.read_text())
+        except OSError, ValueError:
+            return None
+        return document.get("constraint_set_hash") if isinstance(document, dict) else None
 
     fit = recorded(run / "posterior" / "diagnostics.json")
     current = recorded(run / "schema_manifest.json")
@@ -568,20 +576,34 @@ def _unfinished_fit(run: Path) -> dict[str, list[str]] | None:
     EXISTENCE IS NOT PROOF (Codex on #42): a manifest cut short by a full disk still exists. So the
     manifest must parse, and each digest it records must match: `draws_sha256` the store's own, and
     `posterior_summary_sha256` the summary file's. Each key maps to run-relative paths: `missing`,
-    `unreadable` (a manifest that does not parse, or a store that does not open) and `mismatched`.
-    The store's check is identity, not content. `store_digest` reads the digest the store was
-    written with and hashes no draw. HDF5 refuses to open a file shorter than the end its superblock
-    records, so a store cut short is `unreadable`. Both commands re-hash its draws after this
-    (`draws_sha256_matches`). No report is no fit, and a failed report writes no store by design:
-    both are `None`.
+    `unreadable` and `mismatched`. The store's check is identity, not content. `store_digest` reads
+    the digest the store was written with and hashes no draw. HDF5 refuses to open a file shorter
+    than the end its superblock records, so a store cut short is `unreadable`. Both commands re-hash
+    its draws after this (`draws_sha256_matches`).
+
+    NO READ RAISES PAST THIS (Codex on #43). An artifact that exists but cannot be read is
+    `unreadable`: a permission or I/O error, or a directory in its place, raised `OSError` out of
+    both commands, and `reconcile` then wrote no verdict at all (§16.1). So is a report or manifest
+    that does not parse to an object, and a store that does not open. A report that cannot be read
+    is `unreadable`, never `None`, which would let a `reconcile` without a store pass beside it.
+    `_stale_fit` refuses the same report first wherever it runs. No report is no fit, and a failed
+    report writes no store by design: both are `None`.
     """
     import hashlib
     import json
 
     from .models.interfaces import STORE_PATH
 
-    report = run / "posterior" / "diagnostics.json"
-    if not report.exists() or json.loads(report.read_text()).get("passed") is not True:
+    report_path = "posterior/diagnostics.json"
+    if not (run / report_path).exists():
+        return None
+    try:
+        report = json.loads((run / report_path).read_text())
+    except OSError, ValueError:
+        report = None
+    if not isinstance(report, dict):
+        return {"unreadable": [report_path]}
+    if report.get("passed") is not True:
         return None
     summary, manifest = "posterior_summary.parquet", "state_model_manifest.json"
     missing = [path for path in (STORE_PATH, summary, manifest) if not (run / path).exists()]
@@ -591,7 +613,7 @@ def _unfinished_fit(run: Path) -> dict[str, list[str]] | None:
         recorded = json.loads((run / manifest).read_text())
         draws_sha256 = recorded["draws_sha256"]
         summary_sha256 = recorded["posterior_summary_sha256"]
-    except ValueError, KeyError, TypeError:
+    except OSError, ValueError, KeyError, TypeError:
         return {"unreadable": [manifest]}
     # Only a fit that exists gets this far, so a baseline-only run never loads xarray.
     from .models.arviz_io import store_digest
@@ -602,8 +624,11 @@ def _unfinished_fit(run: Path) -> dict[str, list[str]] | None:
             found["mismatched"] = [STORE_PATH]
     except OSError, KeyError:
         found["unreadable"] = [STORE_PATH]
-    if hashlib.sha256((run / summary).read_bytes()).hexdigest() != summary_sha256:
-        found.setdefault("mismatched", []).append(summary)
+    try:
+        if hashlib.sha256((run / summary).read_bytes()).hexdigest() != summary_sha256:
+            found.setdefault("mismatched", []).append(summary)
+    except OSError:
+        found.setdefault("unreadable", []).append(summary)
     return found or None
 
 

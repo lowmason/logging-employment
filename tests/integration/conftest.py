@@ -121,9 +121,13 @@ def plant_finished_fit() -> Callable[..., None]:
     isolates the refusal to it. `damage` is one of:
 
     - `manifest_cut_short`: the manifest's first half, as a full disk left it before `os.replace`;
+    - `manifest_is_a_directory`: a directory where the manifest was. It exists, and reading it
+      raises `OSError`, as a permission or I/O error would. A directory rather than `chmod 000`,
+      which root can still read;
     - `store_cut_short`: the store without its last eight bytes;
     - `store_from_another_fit`: a whole store whose digest the manifest does not record;
-    - `summary_rewritten`: other bytes in `posterior_summary.parquet`.
+    - `summary_rewritten`: other bytes in `posterior_summary.parquet`;
+    - `summary_is_a_directory`: a directory where the summary was, as for the manifest.
 
     xarray is imported inside, so an integration test that plants no fit never loads it.
     """
@@ -152,12 +156,18 @@ def plant_finished_fit() -> Callable[..., None]:
         manifest.write_text(json.dumps(recorded))
         if damage == "manifest_cut_short":
             manifest.write_bytes(manifest.read_bytes()[: manifest.stat().st_size // 2])
+        elif damage == "manifest_is_a_directory":
+            manifest.unlink()
+            manifest.mkdir()
         elif damage == "store_cut_short":
             (run / STORE_PATH).write_bytes((run / STORE_PATH).read_bytes()[:-8])
         elif damage == "store_from_another_fit":
             store("e" * 64)
         elif damage == "summary_rewritten":
             summary.write_bytes(b"another posterior summary")
+        elif damage == "summary_is_a_directory":
+            summary.unlink()
+            summary.mkdir()
         elif damage is not None:
             raise ValueError(f"no such damage: {damage!r}")
 

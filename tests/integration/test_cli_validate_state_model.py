@@ -44,9 +44,11 @@ INTERRUPTIONS = {
 # `cli.py::_unfinished_fit` finds.
 DAMAGE = {
     "manifest_cut_short": {"unreadable": ["state_model_manifest.json"]},
+    "manifest_is_a_directory": {"unreadable": ["state_model_manifest.json"]},
     "store_cut_short": {"unreadable": [STORE_PATH]},
     "store_from_another_fit": {"mismatched": [STORE_PATH]},
     "summary_rewritten": {"mismatched": ["posterior_summary.parquet"]},
+    "summary_is_a_directory": {"unreadable": ["posterior_summary.parquet"]},
 }
 
 
@@ -261,6 +263,33 @@ def test_a_fit_its_manifest_does_not_vouch_for_is_refused_before_anything_is_del
     named = {artifact for artifacts in found.values() for artifact in artifacts}
     for artifact in FIT_ARTIFACTS:
         assert (Path(artifact).name in result.output) is (artifact in named), artifact
+    assert all(path.read_text() == "from an earlier validation" for path in earlier)
+
+
+def test_a_report_that_cannot_be_read_is_refused_before_anything_is_deleted(
+    make_staged_repo,
+) -> None:
+    """Codex on #43. A report that exists but cannot be read raised out of `_stale_fit`, the
+    command's first check. It is refused instead, as a report that records no constraint set is,
+    before the last record is deleted. The report is a directory, which fails to read as a
+    permission or I/O error would, and does so even as root."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    for table in COMPARAND_TABLES:
+        (run / f"{table}.parquet").write_text("a comparand")
+    (run / "posterior" / "diagnostics.json").mkdir(parents=True)
+    earlier = (
+        run / "promotion_record.json",
+        run / "state_model_validation" / "validation_manifest.json",
+    )
+    for path in earlier:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("from an earlier validation")
+    result = _invoke("validate-state-model", repo.config_path)
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit), result.exception
+    # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps the message.
+    assert "fit-state-model" in result.output
     assert all(path.read_text() == "from an earlier validation" for path in earlier)
 
 

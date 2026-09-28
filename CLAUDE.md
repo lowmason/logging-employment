@@ -54,9 +54,11 @@ command list — four of §16.1's fifteen do not exist yet (`fit-size-model`, `d
 (`cli.py::_stale_fit`): a fit outlives its constraint set whenever `build-constraints` re-runs
 without a re-fit, and its draws would re-verify clean against their own bounds. They also refuse,
 unread, a fit whose report records a pass while its store, `posterior_summary.parquet` or
-`state_model_manifest.json` is missing, the manifest does not parse, or a digest it records does
-not match (`cli.py::_unfinished_fit`): the report is written first, so an interrupted fit leaves a
-pass beside draws that were never written, and a file's existence does not prove it whole.
+`state_model_manifest.json` is missing or cannot be read or parsed, or a digest the manifest records
+does not match (`cli.py::_unfinished_fit`): the report is written first, so an interrupted fit
+leaves a pass beside draws that were never written, and a file's existence does not prove it whole.
+Neither check raises on an artifact it cannot read, the report included: each refuses it, so
+`reconcile` still writes its verdict.
 
 Markers are declared but never applied by `addopts`: `slow` is on one unit test and EIGHT
 integration modules (seventeen `mark.slow` sites since plan 16, which added the three model
