@@ -2755,6 +2755,10 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       Size: plan. Done when: each command either publishes bytes first with one commit point, as
       `cli.py::_publish_state_model_validation` does, or each reader refuses a mix by the digests its
       writer's manifest records, and a kill test per command shows no mix is ever read as a run.
+      **Narrowed 2026-09-28 (/deferred quick fix):** `D-130` and `D-135` are closed, so `run-baselines`
+      and `reconcile` now refuse a mix by hash, and `D-134` moved the three single-file writers to
+      `runs.replace_whole`. What stays open here is the multi-table commands (`build-harmonized`,
+      `build-constraints`, `solve-bounds`, `run-baselines`, `validate`) and the kill test per command.
 - [x] `D-134` **`RawStore.put`, `write_source_manifest` and `config.resolved.yaml` are written in place,
       so an interrupted write leaves the file cut short.** The worst is `store.py::RawStore.put`. The
       store is content-addressed and written once, and `put` calls `write_bytes` on the object's final

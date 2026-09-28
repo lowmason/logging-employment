@@ -621,3 +621,22 @@ section's intro into its body; its own text names no stage.
 **Superseded reading** (stage-block rule 1), replaced in the roadmap's Stage 5 `Consumes`:
 
 > Open items that name this stage: `D-109`, `D-115`, `D-116`.
+
+## 2026-09-28 — `/deferred` quick fixes: a run directory read as one run
+
+`D-130`, `D-134`, `D-135`, `D-136` and `D-137` closed together on `claude/run-integrity-quick-fixes`,
+test-first, each a reader or a writer of `runs/<id>/` that could read or leave a mix. `run-baselines`
+now refuses bounds from another constraint set through the precondition it shares with
+`fit-state-model` (`cli.py::_solved_bounds`), which closes Decision 9's open point above. The fit's
+report and manifest record the digest of the bounds file the draws were reconciled into, and
+`cli.py::_stale_fit` refuses a fit whose digest is not the file's, so `solve-bounds` re-run under one
+constraint set no longer leaves a fit looking current. `reconcile` refuses baseline results its
+manifest or the constraint set does not vouch for, from one read, and its verdict names the fit it
+checked. `RawStore.put`, `fetching.write_source_manifest` and `config.resolved.yaml` are written to a
+`.partial` sibling and renamed (`runs.replace_whole`). The D1 fit in `runs/dd7337e89047` predates the
+digest and is refused as unrecorded until `fit-state-model` runs again; its promotion record stands.
+
+**Superseded reading** (stage-block rule 1), replaced in the roadmap's Stage 5 `SHIPPED` block,
+INHERITS (3):
+
+> (3) A fit is read only against the constraint set it was reconciled into (`cli.py::_stale_fit`).
