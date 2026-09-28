@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -10,7 +11,7 @@ import typer
 from .config import load_config
 
 if TYPE_CHECKING:  # annotations only; keeps CLI start-up cheap
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
     import polars as pl
 
@@ -1002,7 +1003,7 @@ def _settle_state_model_validation(run: Path) -> None:
     """Finish or undo a publish of `run`'s state-model validation that did not run to its end.
 
     ONE FUNCTION FOR AN EXCEPTION AND FOR A KILL, and it reads the disk, not the code path.
-    `validate_state_model_command` calls it first, before it reads anything, and
+    `validate-state-model` calls it first, under the run's lock, before it reads anything, and
     `_publish_state_model_validation` calls it before it writes a byte and as its handler, for a
     publish that raised. Which call raised proves nothing about what moved: an interrupt can land
     after `os.replace` has renamed and before it returns. So the leftovers decide, and running
@@ -1029,17 +1030,16 @@ def _settle_state_model_validation(run: Path) -> None:
     And `os.replace` onto an existing empty directory succeeds without a word, so a `.old` beside
     tables that are not new is refused (`UnsettledPublishError`) rather than renamed over them.
 
-    ONE INVOCATION AT A TIME. Nothing locks a run, and a staged record looks the same whether its
-    publish was killed or is still renaming. So every guarantee here holds only while no other
-    `validate-state-model` is running on the run. Beside one that is publishing, a settle, the
-    opening settle of an invocation that then refuses included, can undo its staging under it.
-    The #44 review showed one result in scratch: the publish fails at its commit, its handler's
-    settle deletes the last tables as a committed tail, and the last record is left beside the new
-    tables with nothing for a later settle to find. A settle during the staging is worse, and was
-    measured the same way: it deletes the staging directory as an unfinished write,
-    `build.write_parquet_deterministic` recreates it for the next table, and the publish returns
-    without an error, having committed a record beside tables missing those written before
-    (`D-138`).
+    ONLY UNDER THE RUN'S LOCK (`_run_lock`, `D-138`). Leftovers look the same whether their
+    publish was killed or is still running, so every guarantee here holds only while no other
+    publish is running on the run. Beside one, a settle undoes its staging under it. #44's review
+    measured both interleavings in scratch. During the renames, the publish fails at its commit,
+    its handler's settle deletes the last tables as a committed tail, and the last record is left
+    beside the new tables with nothing for a later settle to find. During the staging, the settle
+    deletes the staging directory as an unfinished write, `build.write_parquet_deterministic`
+    recreates it for the next table, and the publish returns without an error, having committed a
+    record beside tables missing those written before. `validate_state_model_command` holds the
+    lock around every call it makes, its opening settle included.
     """
     import os
     import shutil
@@ -1095,9 +1095,9 @@ def _publish_state_model_validation(
     rename and the commit leaves the last record beside new tables, or none, and nothing in this
     package reads `state_model_validation/`. An interrupt after the commit exits non-zero with the
     new validation published. Nothing is fsynced, so this is atomic against a process that dies,
-    not a machine that does. And nothing locks a run: all of this holds for one invocation at a
-    time, and a second one's settle can undo a publish in flight, leaving a record beside tables it
-    does not describe and no leftover to settle (`_settle_state_model_validation`, `D-138`).
+    not a machine that does. And all of this holds for one publish at a time: the command calls
+    this under the run's lock (`_run_lock`), because another invocation's settle would undo it in
+    flight (`_settle_state_model_validation`, `D-138`).
 
     The record carries the digests of the tables it describes (`model_validation_hashes`). A
     failed gate publishes no tables and no manifest: the last validation's tables are replaced by
@@ -1134,6 +1134,39 @@ def _publish_state_model_validation(
     shutil.rmtree(paths.old_tables, ignore_errors=True)
 
 
+@contextmanager
+def _run_lock(run: Path) -> Iterator[None]:
+    """Hold `run`'s `validate-state-model` lock, or refuse with `RunInUseError` (`D-138`).
+
+    A settle cannot tell a killed publish's leftovers from a running one's, so two invocations on
+    one run must never overlap: the second one's opening settle would undo the first's publish
+    under it (`_settle_state_model_validation`). An `flock` rather than a lock file's existence,
+    because the kernel releases it when its holder exits, killed or not, so no crash leaves a run
+    locked and nothing has to guess whether a lock is stale. The file is kept, empty, after the
+    lock is released: deleting it would let a third invocation lock a new file while a second
+    still waits on the old one. A run directory that does not exist holds nothing to settle or
+    publish, and the command refuses it at its first precondition, so it is not created to be
+    locked.
+    """
+    import fcntl
+
+    from .errors import RunInUseError
+
+    if not run.is_dir():
+        yield
+        return
+    lock = run / "validate_state_model.lock"
+    with lock.open("a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RunInUseError(
+                f"another validate-state-model is running on {run}, and holds {lock.name}: "
+                "a second one beside it could undo its publish. Wait for it to finish"
+            ) from error
+        yield
+
+
 @app.command("validate-state-model")
 def validate_state_model_command(
     config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
@@ -1151,8 +1184,24 @@ def validate_state_model_command(
     go to `state_model_validation/` and the verdict to `promotion_record.json`, both written in full
     before either replaces the last, and the record's rename is the commit
     (`_publish_state_model_validation`). Both verdicts exit 0, because "deploy the simpler method"
-    is an outcome and not an error.
+    is an outcome and not an error. The whole of it runs under the run's lock (`_run_lock`), and a
+    second invocation on the same run is refused before it touches anything.
     """
+    from .errors import RunInUseError
+    from .runs import run_dir, run_id
+
+    cfg = load_config(config)
+    rid = run_id(cfg, _input_digests(cfg))
+    run = run_dir(cfg, rid)
+    try:
+        with _run_lock(run):
+            _validate_state_model(cfg, rid, run)
+    except RunInUseError as error:
+        raise typer.BadParameter(str(error)) from error
+
+
+def _validate_state_model(cfg: Config, rid: str, run: Path) -> None:
+    """`validate_state_model_command`'s body, under the run's lock: check, score and publish."""
     import hashlib
     import json
 
@@ -1168,18 +1217,14 @@ def validate_state_model_command(
     from .models.interfaces import MODEL_ID, MODEL_VERSION, STORE_PATH
     from .models.reconciliation import check_reconciled
     from .models.validation import StateModelProducer
-    from .runs import run_dir, run_id
     from .validate.harness import run_pseudo_suppression
     from .validate.promotion import evaluate_promotion, production_failed_record
 
-    cfg = load_config(config)
-    rid = run_id(cfg, _input_digests(cfg))
-    run = run_dir(cfg, rid)
     # A publish killed last time left its leftovers, and until they are settled the last record
     # can stand beside new tables. Settled here, before any refusal below, so the next run of this
     # command closes that window even when it scores nothing. It restores or finishes; it never
-    # removes the last validation. Run one invocation at a time: beside another's publish it can
-    # undo that publish under it (`_settle_state_model_validation`, `D-138`).
+    # removes the last validation. Only under the run's lock: beside another invocation's publish
+    # it would undo that publish under it (`_run_lock`, `D-138`).
     _settle_state_model_validation(run)
     diagnostics = run / "posterior" / "diagnostics.json"
     for path, command in [
@@ -1232,10 +1277,10 @@ def validate_state_model_command(
     # record is written, and nothing in the record said which fit it was. The gate and the digest
     # the record carries come from one read of the report, so the gate is parsed from the bytes the
     # fit is identified by. `_stale_fit` and `_unfinished_fit` read it before, each on its own, so a
-    # report replaced between their checks and this read goes unnoticed: nothing locks a run, as
-    # nothing serialises two publishes. A failed gate writes no draws, and the passing branch adds
-    # the digest of the draws it checked. Nothing in this package compares these with a later fit
-    # yet; they make the record answerable.
+    # report replaced between their checks and this read goes unnoticed: the run's lock keeps out
+    # another `validate-state-model`, not a `fit-state-model`. A failed gate writes no draws, and
+    # the passing branch adds the digest of the draws it checked. Nothing in this package compares
+    # these with a later fit yet; they make the record answerable.
     report = diagnostics.read_bytes()
     production_gate = json.loads(report)
     fit = {

@@ -66,9 +66,12 @@ the record's rename is the commit (`cli.py::_publish_state_model_validation`, Co
 failure an hour into D1's 27 fits, or a record that cannot be written, keeps the last record and
 its tables, and the leftovers of a killed publish are settled when the command next starts
 (`cli.py::_settle_state_model_validation`), which refuses with `UnsettledPublishError` the one
-state no single publish leaves. **Run one `validate-state-model` per run at a time**: nothing locks
-a run, and a second invocation's opening settle, even one that then refuses, can undo a publish in
-flight under it, leaving a record beside tables it does not describe and nothing to settle (`D-138`).
+state no single publish leaves. The command holds an `flock` on
+`runs/<id>/validate_state_model.lock` for its whole run (`cli.py::_run_lock`, `D-138`), and a second
+invocation on the same run is refused with `RunInUseError` before it touches anything: its opening
+settle would otherwise undo a publish in flight, in one measured case committing a record beside
+tables it had lost, without an error. The kernel releases the lock on exit, killed or not, and the
+empty file stays.
 
 Markers are declared but never applied by `addopts`: `slow` is on one unit test and EIGHT
 integration modules (seventeen `mark.slow` sites since plan 16, which added the three model

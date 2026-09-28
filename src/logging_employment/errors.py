@@ -202,6 +202,20 @@ class UnsettledPublishError(LoggingEmploymentError):
     finishes or undoes it. One state it cannot read: a staged record with the last tables at
     `.old` beside other tables. Renaming `.old` over them would be a guess, and `os.replace` onto
     an empty directory succeeds without a word, so it is refused, naming both, for a human to
-    settle. Two invocations of `validate-state-model` on one run at once can leave it; nothing else
-    does. They can also leave worse without raising this, since nothing locks a run (`D-138`).
+    settle. Only two publishes on one run at once can leave it, and `validate-state-model` refuses
+    to run beside another on the same run (`RunInUseError`), so only a publish run outside that
+    command, or a directory edited by hand, can.
+    """
+
+
+class RunInUseError(LoggingEmploymentError):
+    """Another `validate-state-model` holds the run's lock (`D-138`).
+
+    `cli.py::_settle_state_model_validation` reads a publish's progress from its leftovers, and
+    those look the same whether the publish was killed or is still running. So a settle beside a
+    publish in flight undoes it under it, and in one measured interleaving the publish then
+    returned without an error, having committed a record beside tables it had lost. The command
+    holds an `flock` on `validate_state_model.lock` from before its first settle to the end of its
+    publish, and a second invocation is refused with this before it touches anything. The kernel
+    releases the lock when its holder exits, killed or not, so no crash leaves the run locked.
     """

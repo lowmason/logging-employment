@@ -9,8 +9,10 @@ nothing, so only the tests that fit are `slow` (plan 16's Decision 13).
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import polars as pl
@@ -533,6 +535,60 @@ def test_a_refused_run_first_settles_what_a_killed_publish_left(make_staged_repo
         "validation_scores.parquet": "the last scores"
     }
     assert not any((run / leftover).exists() for leftover in LEFTOVERS)
+
+
+def test_a_run_another_invocation_holds_is_refused_untouched(make_staged_repo) -> None:
+    """`D-138`. A settle cannot tell a killed publish's leftovers from a running one's, so a second
+    invocation, even one that would then refuse, used to settle a publish in flight out from under
+    it. Now the command holds the run's lock from before its first settle to the end of its
+    publish, and a second one is refused before it touches anything. The lock is held here by the
+    test: `flock` locks belong to an open file description, so the command's own open conflicts
+    with it inside one process, on Linux and macOS alike. Once the holder lets go, the next
+    invocation settles, and it lets go of the lock itself."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    # What a publish still staging looks like: indistinguishable from one killed there.
+    (run / "promotion_record.json").write_text("the last record")
+    (run / "state_model_validation").mkdir()
+    (run / "state_model_validation" / "validation_scores.parquet").write_text("the last scores")
+    (run / "state_model_validation.partial").mkdir()
+    (run / "state_model_validation.partial" / "validation_scores.parquet").write_text("staging")
+    (run / "promotion_record.json.partial").write_text("the new record")
+    lock = run / "validate_state_model.lock"
+
+    def tree() -> dict[str, bytes | None]:
+        """The whole run, a directory as `None`: a refusal must leave every byte of it."""
+        return {
+            path.relative_to(run).as_posix(): None if path.is_dir() else path.read_bytes()
+            for path in sorted(run.rglob("*"))
+        }
+
+    with lock.open("a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        before = tree()
+        result = _invoke("validate-state-model", repo.config_path)
+        assert isinstance(result.exception, SystemExit), result.exception
+        # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps it.
+        assert "running" in result.output
+        assert tree() == before
+    for _ in range(2):
+        result = _invoke("validate-state-model", repo.config_path)
+        assert isinstance(result.exception, SystemExit), result.exception
+        assert "running" not in result.output
+        assert "missing" in result.output
+    assert not any((run / leftover).exists() for leftover in LEFTOVERS)
+    assert (run / "promotion_record.json").read_text() == "the last record"
+
+
+def test_a_run_that_does_not_exist_is_not_created_to_be_locked(make_staged_repo) -> None:
+    """A run directory that does not exist holds nothing to settle or publish, so the command is
+    refused at its first precondition without creating one for its lock file."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    shutil.rmtree(repo.run_dir)
+    result = _invoke("validate-state-model", repo.config_path)
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert "missing" in result.output
+    assert not repo.run_dir.exists()
 
 
 def test_a_store_that_cannot_be_read_fails_before_anything_is_deleted(
