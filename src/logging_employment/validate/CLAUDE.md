@@ -249,7 +249,11 @@ reddens on a second reader. It compares the model's `state_model_validation/` ta
 SAME run's `validate` tables, whose digests the record carries. `cli.py::_read_comparand` reads
 each of those tables once, hashing and parsing the same bytes, and the command refuses a comparand
 whose digests are not the `output_hashes` of `validate`'s own `validation_manifest.json`, or that
-cannot be read (#44), so the record never names a comparand no `validate` wrote.
+cannot be read (#44), so the record never names a comparand no `validate` wrote. It names the fit
+too, in `fit`: the sha256 of the `posterior/diagnostics.json` bytes its gate was parsed from, that
+report's `constraint_set_hash`, and the digest of the draws it checked (`null` for a failed gate,
+which writes none). `fit-state-model` can re-run after the record, and nothing compares the two
+yet: the block makes the record answerable, and enforces nothing.
 The readings §13.10 leaves open are
 plan 16's Decision 4, and each is written into the record beside its evidence:
 

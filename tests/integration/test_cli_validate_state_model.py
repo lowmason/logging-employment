@@ -146,6 +146,14 @@ def test_the_record_states_a_verdict_and_what_it_was_measured_against(validated)
         "run_id": record["run_id"],
         **{f"{t}_sha256": h for t, h in before.items()},
     }
+    # Which fit the verdict describes: `fit-state-model` can re-run on this run after the record.
+    fit_manifest = json.loads((repo.run_dir / "state_model_manifest.json").read_text())
+    schema = json.loads((repo.run_dir / "schema_manifest.json").read_text())
+    assert record["fit"] == {
+        "diagnostics_sha256": _sha256(repo.run_dir / "posterior" / "diagnostics.json"),
+        "constraint_set_hash": schema["constraint_set_hash"],
+        "draws_sha256": fit_manifest["draws_sha256"],
+    }
     assert set(record["gates"]) == {
         "hard_constraints",
         "convergence",
@@ -370,6 +378,13 @@ def test_a_failed_fits_report_alone_is_written_up_as_not_beaten(make_staged_repo
     assert record["comparand"] == {
         "run_id": record["run_id"],
         **{f"{table}_sha256": recorded[table] for table in COMPARAND_TABLES},
+    }
+    # The fit the verdict describes: the report it was read from, and no draws, since a failed
+    # gate writes none.
+    assert record["fit"] == {
+        "diagnostics_sha256": _sha256(run / "posterior" / "diagnostics.json"),
+        "constraint_set_hash": current,
+        "draws_sha256": None,
     }
     assert list((run / "state_model_validation").iterdir()) == []
     assert not any((run / leftover).exists() for leftover in LEFTOVERS)

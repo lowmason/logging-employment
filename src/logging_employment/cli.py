@@ -1132,6 +1132,7 @@ def validate_state_model_command(
     (`_publish_state_model_validation`). Both verdicts exit 0, because "deploy the simpler method"
     is an outcome and not an error.
     """
+    import hashlib
     import json
 
     from .contracts import (
@@ -1203,22 +1204,34 @@ def validate_state_model_command(
             **{f"{table}_sha256": comparand.sha256[table] for table in _COMPARAND_TABLES},
         },
     }
-    production_gate = json.loads(diagnostics.read_text())
+    # WHICH FIT the verdict describes (#44). `fit-state-model` can re-run on this run after the
+    # record is written, and nothing in the record said which fit it was. The report is read once,
+    # so the gate is parsed from the bytes the fit is identified by. A failed gate writes no draws,
+    # and the passing branch adds the digest of the draws it checked. Nothing in this package
+    # compares these with a later fit yet; they make the record answerable.
+    report = diagnostics.read_bytes()
+    production_gate = json.loads(report)
+    fit = {
+        "diagnostics_sha256": hashlib.sha256(report).hexdigest(),
+        "constraint_set_hash": production_gate["constraint_set_hash"],
+        "draws_sha256": None,
+    }
     if not production_gate["passed"]:
         record = production_failed_record(MODEL_ID, production_gate, cfg.promotion)
         _publish_state_model_validation(
-            run, {**record, **envelope}, tables={}, validation_manifest=None
+            run, {**record, **envelope, "fit": fit}, tables={}, validation_manifest=None
         )
         typer.echo("production fit failed §11.14: not_beaten, section_10_8_hierarchy selected")
         return
 
     store = run / STORE_PATH
     draws = read_store(store)
+    fit["draws_sha256"] = draws_digest(draws)
     check = check_reconciled(draws, tolerance=cfg.reconciliation.tolerance)
     store_check = {
         "max_anchor_drift": check.max_anchor_drift,
         "bound_violations": check.bound_violations,
-        "draws_sha256_matches": draws_digest(draws) == store_digest(store),
+        "draws_sha256_matches": fit["draws_sha256"] == store_digest(store),
     }
     store_check["passed"] = check.passed and bool(store_check["draws_sha256_matches"])
 
@@ -1249,7 +1262,7 @@ def validate_state_model_command(
     )
     _publish_state_model_validation(
         run,
-        {**record, **envelope},
+        {**record, **envelope, "fit": fit},
         tables={
             "validation_scores": result.scores,
             "validation_metrics": result.metrics,
