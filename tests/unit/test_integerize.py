@@ -65,15 +65,30 @@ def test_an_empty_input_returns_empty() -> None:
     assert integerize({}, total=0) == {}
 
 
+@pytest.mark.parametrize(
+    ("total", "refusal"),
+    [
+        (5, r"5 unit\(s\) could not be placed"),
+        (-3, "summed integer lower bounds 0 exceed the required total -3"),
+    ],
+)
+def test_no_cells_cannot_hold_a_nonzero_total(total: int, refusal: str) -> None:
+    """Zero cells hold exactly zero, so any other total is infeasible and falls to the refusal that
+    names it: caps summing short of a positive total, lower bounds past a negative one. An early
+    return used to hand back `{}` for both, a result that does not sum to `total` (D-139's review)."""
+    with pytest.raises(InfeasibleResidualError, match=refusal):
+        integerize({}, total=total)
+
+
 def test_a_total_below_the_summed_lower_bounds_raises() -> None:
     with pytest.raises(InfeasibleResidualError, match="2 exceed the required total 1"):
         integerize({"01": 1.0, "02": 1.0}, total=1, lower={"01": 1, "02": 1})
 
 
 def test_a_remainder_the_caps_cannot_absorb_is_refused_by_name() -> None:
-    """The floors fit the total, so the base check passes; the caps then leave room for one unit of
-    the four still to place. The third of `integerize`'s refusals, and until D-119 the only one no
-    test reached."""
+    """No lower bound is set, so the summed-lower-bounds check passes; the cap then leaves room for
+    one unit of the four still to place. The third of `integerize`'s refusals, and until D-119 the
+    only one no test reached."""
     with pytest.raises(InfeasibleResidualError, match=r"3 unit\(s\) could not be placed"):
         integerize({"a": 1.0}, total=5, upper={"a": 2})
 
@@ -119,12 +134,130 @@ def test_every_feasible_bounded_input_places_all_its_units() -> None:
                 assert out[c] <= caps[c]
 
 
+def test_a_cell_seated_at_its_floor_gives_a_unit_back_rather_than_refusing() -> None:
+    """D-139. Seating each cell at `max(floor, lower)` gives 2, 2 and 5 -- one past the total -- and
+    the old base check refused. A floor is not a bound: `c` can give its unit back, and 2, 2 and 4
+    satisfies every bound."""
+    out = integerize({"a": 1.01, "b": 1.01, "c": 5.98}, total=8, lower={"a": 2, "b": 2})
+    assert out == {"a": 2, "b": 2, "c": 4}
+
+
+def test_a_unit_is_handed_back_in_the_reverse_of_placement_order() -> None:
+    """`a` and `b` tie on remainder, so placement would give `a` the unit first; handing back runs the
+    same order backwards, so `b` gives its unit up and `a` keeps its own. `c` and `d` sit at their
+    lower bounds and have nothing to give."""
+    out = integerize({"a": 1.45, "b": 1.45, "c": 0.05, "d": 0.05}, total=3, lower={"c": 1, "d": 1})
+    assert out == {"a": 1, "b": 0, "c": 1, "d": 1}
+
+
+def test_the_smallest_remainder_gives_its_unit_back_first() -> None:
+    """Remainder order and `cell_id` order disagree here, which the tie above cannot show: `b`'s
+    remainder (.8) outranks `a`'s (.1), so placement serves `b` first and handing back takes from
+    `a` first. A hand-back by descending `cell_id` would take from `b` instead."""
+    out = integerize({"a": 1.1, "b": 1.8, "c": 0.05, "d": 0.05}, total=3, lower={"c": 1, "d": 1})
+    assert out == {"a": 0, "b": 1, "c": 1, "d": 1}
+
+
+def test_one_cell_gives_back_several_units_over_several_passes() -> None:
+    """Three lower bounds seat 1 each over values of .01, so the seats overshoot by two and only `c`
+    can give. The loop visits `c` once per pass, so this needs the second pass the step limit
+    allows; a single pass would return a sum of 4 without raising."""
+    out = integerize(
+        {"a": 0.01, "b": 0.01, "c": 2.97, "d": 0.01}, total=3, lower={"a": 1, "b": 1, "d": 1}
+    )
+    assert out == {"a": 1, "b": 1, "c": 0, "d": 1}
+
+
+def test_the_refusal_reports_the_summed_lower_bounds_not_the_seats() -> None:
+    """The lower bounds sum to 2 against a total of 1, so this is refused. The old check summed the
+    seats instead and reported 7, a number that is no bound of anything."""
+    with pytest.raises(
+        InfeasibleResidualError, match="summed integer lower bounds 2 exceed the required total 1"
+    ):
+        integerize({"a": 5.0, "b": 0.0}, total=1, lower={"b": 2})
+
+
+def test_every_feasible_input_cut_from_float_bounds_places_all_its_units() -> None:
+    """The runner's call shape, swept. Each cell gets a float interval, cut to integer bounds the way
+    `baselines.runner.integer_bounds` cuts it (ceil the lower, floor the upper), and its value lies
+    inside the FLOAT interval -- so a value may sit below its integer lower bound, which is what makes
+    a seat exceed its floor. The values sum to the total, as a reconciled allocation does. Feasibility
+    is decided outside the function: summed integer lower bounds at or below the total, and the caps
+    at or above it, so any exception is the algorithm's. The sweep above draws caps only, which is
+    why D-139's shape went unwitnessed there.
+
+    Seats overshoot the total only when values sit well below their integer lower bounds, which an
+    even spread rarely produces (1 case in 400). So half the draws pin some cells at a float lower
+    bound just above an integer and spread the rest of the total over the others, and the sweep
+    asserts it reached the hand-back path, including hand-backs of two or more units.
+    """
+    import random
+
+    def spread(cells: list[str], amount: float) -> dict[str, float] | None:
+        """`amount` shared across `cells` at one fraction of each cell's float range, if it fits."""
+        floor_sum = sum(low[c] for c in cells)
+        reach_sum = sum(reach[c] for c in cells)
+        if not cells or reach_sum == floor_sum or not floor_sum <= amount <= reach_sum:
+            return None
+        share = (amount - floor_sum) / (reach_sum - floor_sum)
+        return {c: low[c] + share * (reach[c] - low[c]) for c in cells}
+
+    rng = random.Random(20260928)
+    checked = handed_back = handed_back_twice = 0
+    while checked < 400:
+        n = rng.randint(2, 6)
+        cells = [f"{i:02d}" for i in range(n)]
+        tight = [c for c in cells if rng.random() < 0.5] if rng.random() < 0.5 else []
+        low = {
+            c: rng.randint(0, 5) + rng.uniform(0.01, 0.2)
+            if c in tight
+            else rng.choice([0.0, float(rng.randint(0, 6)), rng.uniform(0.0, 6.0)])
+            for c in cells
+        }
+        high: dict[str, float | None] = {
+            c: None if rng.random() < 0.4 else low[c] + rng.uniform(0.0, 5.0) for c in cells
+        }
+        lower = {c: math.ceil(low[c]) for c in cells}
+        upper = {c: None if high[c] is None else math.floor(high[c]) for c in cells}
+        if any(upper[c] is not None and lower[c] > upper[c] for c in cells):
+            continue  # an interval holding no integer is the contradictory-pair refusal, not this one
+        floor_total = sum(lower.values())
+        cap_total = sum(u if u is not None else floor_total + 20 for u in upper.values())
+        total = rng.randint(floor_total, min(cap_total, floor_total + 20))
+        reach = {c: high[c] if high[c] is not None else low[c] + total + 1.0 for c in cells}
+        values = None
+        if tight:
+            rest = spread([c for c in cells if c not in tight], total - sum(low[c] for c in tight))
+            values = None if rest is None else {**{c: low[c] for c in tight}, **rest}
+        values = values or spread(cells, total)
+        if values is None:
+            continue
+        seats = sum(
+            max(math.floor(values[c]), lower[c])
+            if upper[c] is None
+            else min(max(math.floor(values[c]), lower[c]), upper[c])
+            for c in cells
+        )
+        handed_back += seats > total
+        handed_back_twice += seats - total >= 2
+        out = integerize(values, total=total, lower=lower, upper=upper)
+        assert sum(out.values()) == total
+        for c in cells:
+            assert out[c] >= lower[c]
+            if upper[c] is not None:
+                assert out[c] <= upper[c]
+        checked += 1
+    assert handed_back >= 40, f"the sweep reached the hand-back path only {handed_back} times"
+    assert handed_back_twice >= 10, f"only {handed_back_twice} cases handed back two or more units"
+
+
 def test_a_contradictory_bound_pair_is_refused() -> None:
     """`floors` took the lower bound, then the cap loop overwrote it with the upper bound.
 
     Nothing compared the two, so `lower=5, upper=3` returned 3 -- below a bound the caller
-    declared. D1 has `lower=0, upper=None` throughout, so this is latent here and live in
-    Stage 6, which supplies real class bands.
+    declared. It cannot arise on D1, where every LP, MILP and selected bound endpoint is an integer
+    and no lower sits above its upper (measured 2026-09-28); it takes a float interval holding no
+    integer, which `baselines.runner.integer_bounds` cuts to a lower above its upper.
     """
     with pytest.raises(InfeasibleResidualError, match="lower bound 5 above its upper bound 3"):
         integerize({"a": 4.0}, 3, lower={"a": 5}, upper={"a": 3})

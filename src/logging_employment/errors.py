@@ -119,11 +119,9 @@ class UniverseClosureError(LoggingEmploymentError):
 class InfeasibleResidualError(LoggingEmploymentError):
     """§12.3's summed bounds exclude the residual, so no feasible scaling exists.
 
-    `reconcile.integerize` raises it for §12.6's three integer refusals (`D-119`): a floor above its
-    cap, seats summing past the total, and a remainder the caps cannot absorb. The first and last
-    leave no integer allocation inside the bounds that sums to the total. The middle one does not
-    prove that, because a seat is a cell's floor raised to its lower bound and a floor is not a
-    bound (`integerize`'s docstring has a refused input that a feasible allocation exists for).
+    `reconcile.integerize` raises it for §12.6's three integer refusals (`D-119`): a lower bound
+    above its cap, lower bounds summing past the total, and caps summing short of it. Each leaves no
+    integer allocation inside the bounds that sums to the total (`D-139`).
     """
 
 

@@ -2786,7 +2786,7 @@ docstrings first described honestly, and which predates it: two skeptics confirm
 reproduced by hand. `D-140` is the rule `D-119` applied at four sites without anything saying which
 refusals it covers.
 
-- [ ] `D-139` **`integerize` refuses a feasible input when the cells' floors, raised to their lower
+- [x] `D-139` **`integerize` refuses a feasible input when the cells' floors, raised to their lower
       bounds, sum past the total.** `reconcile/integerize.py::integerize` seats each cell at
       `max(floor(value), lower)`, capped, and raises `InfeasibleResidualError` when the seats sum past
       `total`. A floor is not a bound, so a cell seated at its floor can give a unit back:
@@ -2796,8 +2796,9 @@ refusals it covers.
       a lower bound at or below a value is at or below its floor only when the bound is an integer,
       and D1's bounds are (0 fractional endpoints of 5,531 rows in `runs/dd7337e89047` and
       `runs/4cf47a918dd8`, measured 2026-09-28). A fractional lower bound reaches `integerize` only
-      through `baselines.runner.integer_bounds` on a non-integer interval, which
-      `constraints.enforce_integrality: false` allows (`D-032`). It went unwitnessed because
+      through `baselines.runner.integer_bounds` on an interval with a fractional endpoint, and every
+      LP, MILP and selected endpoint on D1 is an integer (`D-032` is the same shape's neighbour). It
+      went unwitnessed because
       `test_every_feasible_bounded_input_places_all_its_units` draws upper caps and never a lower
       bound. §12.6 already admits the fix: step 3 allows "a controlled-rounding optimizer" and step 4
       requires respecting "deterministic lower and upper integer bounds", so handing a unit back needs
@@ -2809,6 +2810,30 @@ refusals it covers.
       above their lower bound in the reverse of placement order; the feasibility sweep draws lower
       bounds and failed first against the old check; the `integerize.py` and `errors.py` docstrings and
       the refusal message describe the new check; and that stale test docstring is corrected.
+      **→ done 2026-09-28 (/deferred quick fix).** `integerize` compares the summed lower bounds, not
+      the seats, with `total`, hands units back from cells above their lower bound in the reverse of
+      placement order, and no longer returns early on an empty `values`, so its three refusals are
+      exactly the infeasible cases. Seven tests failed first and pass now:
+      `test_a_cell_seated_at_its_floor_gives_a_unit_back_rather_than_refusing` (refused, seats 9
+      against 8), `test_a_unit_is_handed_back_in_the_reverse_of_placement_order` and
+      `test_the_smallest_remainder_gives_its_unit_back_first` (both refused; the second is the one a
+      hand-back by descending `cell_id` fails),
+      `test_one_cell_gives_back_several_units_over_several_passes` (refused; a single-pass hand-back
+      returns a sum of 4 without raising),
+      `test_the_refusal_reports_the_summed_lower_bounds_not_the_seats` (the message said 7, not 2),
+      `test_no_cells_cannot_hold_a_nonzero_total` (both cases returned `{}`), and the new sweep
+      `test_every_feasible_input_cut_from_float_bounds_places_all_its_units`, which cuts float
+      intervals the way `integer_bounds` does, pins some values at a lower bound just above an
+      integer, asserts it reached the hand-back path (55 of its 400 cases, 23 of them handing back two
+      or more units), and was refused on the old check. The order and multi-pass tests were added
+      after the branch review found both mutants survived every earlier test. The caps-only sweep is
+      kept. The `integerize.py`, `errors.py` and `reconcile/CLAUDE.md` text and the stale test
+      docstring now describe the new check. D1's outputs cannot move: with integer bounds the seats
+      sum to at most the integer total the values sum to, so nothing is handed back. What it accepts
+      widened, and not only for feasible inputs: a `total` below `sum(values)` was refused by the old
+      check only by accident (`{"a": 5.7}` at `total=3`) and is now met by handing units back, as a
+      `total` above it always was. Nothing compares the two; the one caller passes a total equal to
+      `sum(values)`.
 - [ ] `D-140` **The fail-closed rule does not say which refusals it covers, and ten data-triggered
       refusals still raise `ValueError`.** Root `CLAUDE.md`'s "Fail closed with a named error" bullet
       says every class in `errors.py` subclasses `LoggingEmploymentError` and carries the offending

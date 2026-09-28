@@ -3,7 +3,8 @@
 "Integerization MUST NOT be applied independently cell by cell." That sentence is the module's
 reason to exist: three cells at 3.4 rounded independently give 9, and the margin they were
 reconciled to is gone. The units are allocated against the margin instead -- floor everything,
-count what is left, and hand the remainder out by largest fractional part.
+count what is left, and hand the remainder out by largest fractional part; when lower bounds seat
+more than the margin, hand units back in the reverse of that order.
 
 THE TIE-BREAK MUST BE DETERMINISTIC. §16.1 requires every command to be idempotent for the same
 inputs. Ties are common here because reconciled allocations of equal-weight cells are exactly
@@ -44,18 +45,22 @@ def integerize(
 ) -> dict[str, int]:
     """Round `values` to integers summing exactly to `total`, respecting integer bounds.
 
+    Each cell is seated at its floor, raised to its `lower` and cut to its `upper`. Seats short of
+    `total` take units by largest remainder; seats past it give units back, from cells above their
+    lower bound, in the reverse of that order. `{"a": 1.01, "b": 1.01, "c": 5.98}` at `total=8` with
+    `lower={"a": 2, "b": 2}` seats 2, 2 and 5, so `c` gives one back: 2, 2 and 4. §12.6 allows the
+    hand-back: step 3 names "a controlled-rounding optimizer" beside largest remainder, and step 4
+    requires the integer bounds to hold.
+
     Every refusal is `InfeasibleResidualError`, the integer half of the question §12.3's scaling
-    answers for floats, but the three do not prove the same thing. A `lower` above an `upper` and a
-    remainder the caps cannot absorb each leave no integer allocation inside the bounds that sums
-    to `total`. The first is not only a caller's slip: `baselines.runner.integer_bounds` cuts a
-    float interval holding no integer, such as [41.2, 41.9], to a lower of 42 and an upper of 41.
-    The base check proves less. It refuses when the seats -- each cell's floor, raised to its lower
-    bound -- sum past `total`, and a floor is not a bound: `{"a": 1.01, "b": 1.01, "c": 5.98}` at
-    `total=8` with `lower={"a": 2, "b": 2}` seats 2, 2 and 5 and is refused, though 2, 2 and 4
-    satisfies every bound.
+    answers for floats, and the three are exactly the infeasible cases: a `lower` above its `upper`,
+    lower bounds summing past `total`, and caps summing short of it. The first is not only a
+    caller's slip: `baselines.runner.integer_bounds` cuts a float interval holding no integer, such
+    as [41.2, 41.9], to a lower of 42 and an upper of 41. An empty `values` is no exception: its
+    bounds sum to zero, so it holds a total of zero and refuses any other, which is why it takes no
+    early return (both loops' step limits are zero there). Nothing compares `sum(values)` with
+    `total`; the runner's total is the rounded residual, an integer the values already sum to.
     """
-    if not values:
-        return {}
     lower = lower or {}
     upper = upper or {}
 
@@ -81,14 +86,17 @@ def integerize(
         cap = upper.get(cell)
         floors[cell] = int(cap) if cap is not None and seat > cap else seat
 
-    base = sum(floors.values())
-    if base > total:
+    # The LOWER BOUNDS are what the total must cover, not the seats. A seat is a floor raised to its
+    # lower bound, and a floor is not a bound: comparing the seats refused inputs a feasible
+    # allocation exists for (D-139), and reported their sum as if it were the bounds'.
+    lower_total = sum(lower.get(cell, 0) for cell in values)
+    if lower_total > total:
         raise InfeasibleResidualError(
-            f"summed integer lower bounds {base} exceed the required total {total}; "
+            f"summed integer lower bounds {lower_total} exceed the required total {total}; "
             "§12.6 cannot round into an infeasible margin"
         )
 
-    remaining = total - base
+    base = sum(floors.values())
     # The remainder is measured from the floor ACTUALLY USED, not from `math.floor(value)`. Once
     # a floor has been raised by `lower` or lowered by `upper`, the raw fractional part is no
     # longer the cell's claim on the spare units: a cell whose floor was raised past its own
@@ -100,6 +108,22 @@ def integerize(
     )
 
     out = dict(floors)
+    # Seats past the total hand units back in the REVERSE of placement order: smallest claim first,
+    # and on a tie the higher cell_id gives up the unit the lower one would have received. Only a
+    # cell above its lower bound can give one. That never runs out: every seat is at or above its
+    # lower bound and `lower_total <= total`, so the seats stand at least `excess` above the bounds,
+    # every full pass hands back at least one unit, and `excess` passes suffice.
+    excess = base - total
+    index = 0
+    limit = len(order) * max(excess, 0)
+    while excess > 0 and index < limit:
+        cell = order[-1 - index % len(order)]
+        if out[cell] > lower.get(cell, 0):
+            out[cell] -= 1
+            excess -= 1
+        index += 1
+
+    remaining = total - sum(out.values())
     index = 0
     # Fixed before the loop, from the INITIAL remainder. One full pass of `len(order)` indices
     # places at least one unit unless no cell has headroom left, so `remaining` passes suffice.
