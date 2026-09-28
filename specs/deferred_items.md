@@ -2672,8 +2672,8 @@ written, so a record write that failed left the last record beside the new table
 command, and two siblings in its own inputs, the comparand and the fit it names. A sweep of the other
 commands for the same classes found `D-133` to `D-137`; #44 left them alone, since each is another
 command's contract. `D-130` is one of these classes and was already open. `D-138` is
-`validate-state-model`'s own: #44's pre-push review found that nothing locks a run. Each claim was
-re-read against the code at #44's head; the pins are symbols, not lines.
+`validate-state-model`'s own: #44's pre-push review found that nothing locked a run, and #44 then
+closed it. Each claim was re-read against the code at #44's head; the pins are symbols, not lines.
 
 - [ ] `D-133` **Every command that writes several outputs, `validate-state-model` aside, replaces them
       in place, one file at a time, so a failure partway leaves files that no single run wrote.**
@@ -2743,7 +2743,7 @@ re-read against the code at #44's head; the pins are symbols, not lines.
       Size: quick-fix. Done when: `reconcile`'s `state_model` block names the fit the way the
       promotion record's `fit` does, and a test re-fits after `reconcile` and finds the verdict's fit
       differ from the new one.
-- [ ] `D-138` **Nothing locks a run, so a second `validate-state-model` on it can corrupt the first's
+- [x] `D-138` **Nothing locks a run, so a second `validate-state-model` on it can corrupt the first's
       publish without an error.** `cli.py::_settle_state_model_validation` reads a publish's progress
       from its leftovers, and those look the same whether the publish was killed or is still running.
       #44 made the command settle at its start, before any refusal, so any second invocation on the
@@ -2761,3 +2761,9 @@ re-read against the code at #44's head; the pins are symbols, not lines.
       opening settle to the end of its publish, one that a kill releases (`fcntl.flock` on a lock
       file, say). A second invocation must refuse with a named error before it settles anything, and
       a test holding the lock sees the command refuse and the run's tree unchanged.
+      → done 2026-09-28, in #44: `04cd38f` holds an `flock` on `runs/<id>/validate_state_model.lock`
+      from before the opening settle to the end of the publish (`cli.py::_run_lock`), and refuses a
+      second invocation with the new `errors.RunInUseError`, shown as a `BadParameter`. A test that
+      holds the lock sees the command refuse and every byte of the run unchanged, and the next two
+      invocations settle once it is released. A run directory that does not exist is not created
+      to be locked. The suite with `data/` went from 1775 to 1777 passed, 47 deselected.
