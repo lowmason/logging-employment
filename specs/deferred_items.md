@@ -2670,12 +2670,14 @@ this protocol, and `D-131` and `D-132` come from the promotion record. The measu
 Codex's P1 on #44 was that `validate-state-model` swapped its new tables in before its record was
 written, so a record write that failed left the last record beside the new tables. #44 fixed that
 command, and two siblings in its own inputs, the comparand and the fit it names. A sweep of the other
-commands for the same classes found what is below; #44 left them alone, since each is another
-command's contract. `D-130` is one of these classes and was already open. Each claim was re-read
-against the code at #44's head; the pins are symbols, not lines.
+commands for the same classes found `D-133` to `D-137`; #44 left them alone, since each is another
+command's contract. `D-130` is one of these classes and was already open. `D-138` is
+`validate-state-model`'s own: #44's pre-push review found that nothing locks a run. Each claim was
+re-read against the code at #44's head; the pins are symbols, not lines.
 
-- [ ] `D-133` **Every command but `validate-state-model` replaces its outputs in place, one file at a
-      time, so a failure partway leaves files that no single run wrote.** `build.write_parquet_deterministic`
+- [ ] `D-133` **Every command that writes several outputs, `validate-state-model` aside, replaces them
+      in place, one file at a time, so a failure partway leaves files that no single run wrote.**
+      (`reconcile` writes one manifest, through `cli.py::_write_manifest`.) `build.write_parquet_deterministic`
       writes each table straight to its path, so a failure mid-write leaves that table cut short, and
       each command then writes several. `build_harmonized` writes its five staged tables one by one
       with no manifest, and `cli.py::_input_digests` hashes whatever is in `data/staged/`, so a build
@@ -2689,8 +2691,9 @@ against the code at #44's head; the pins are symbols, not lines.
       `validate-state-model` refuses a comparand whose digests are not `validate`'s own (#44), and
       `_unfinished_fit` refuses a fit whose manifest does not vouch for it. The rest have no check.
       The staged layer is one, `run-baselines` reads the bounds unchecked (`D-130`), and `reconcile`
-      reads the baseline results unchecked (`D-135`). `component_rank`, `disclosure_flags` and the
-      manifests have no reader in the package, but §14 and a reader of the run do.
+      reads the baseline results unchecked (`D-135`). `component_rank`, `disclosure_flags`,
+      `constraint_manifest.parquet`, `bounds_manifest.json` and `baseline_manifest.json` have no
+      reader in the package, but §14 and a reader of the run do.
       Size: plan. Done when: each command either publishes bytes first with one commit point, as
       `cli.py::_publish_state_model_validation` does, or each reader refuses a mix by the digests its
       writer's manifest records, and a kill test per command shows no mix is ever read as a run.
@@ -2702,8 +2705,8 @@ against the code at #44's head; the pins are symbols, not lines.
       `was_already_present`. `fetching.write_source_manifest` rewrites `runs/source_manifest.parquet`
       in place, and that file is how `build.snapshot_paths` resolves CBP's ambiguous snapshots. The
       cut-short manifest fails when read, and with it the record of which snapshots a run used, though
-      the stored bytes remain. `build-constraints`
-      writes `config.resolved.yaml` with `write_text`, and nothing reads it back.
+      the stored bytes remain. `build-constraints` writes `config.resolved.yaml` with `write_text`, and
+      nothing reads it back.
       Size: quick-fix. Done when: each writes a `.partial` sibling and renames it, as
       `cli.py::_write_manifest` does, `put` refuses an existing object whose bytes are not its digest,
       and a test interrupts each write and finds the last file whole or none.
@@ -2740,3 +2743,21 @@ against the code at #44's head; the pins are symbols, not lines.
       Size: quick-fix. Done when: `reconcile`'s `state_model` block names the fit the way the
       promotion record's `fit` does, and a test re-fits after `reconcile` and finds the verdict's fit
       differ from the new one.
+- [ ] `D-138` **Nothing locks a run, so a second `validate-state-model` on it can corrupt the first's
+      publish without an error.** `cli.py::_settle_state_model_validation` reads a publish's progress
+      from its leftovers, and those look the same whether the publish was killed or is still running.
+      #44 made the command settle at its start, before any refusal, so any second invocation on the
+      run can undo a first one's publish in flight, not only a second publish. Both interleavings
+      below were measured in scratch against the real functions. During the renames (#44's pre-push
+      review): the second settle unlinks the staged record, the first fails at its commit, and its
+      handler's settle deletes the last tables as a committed publish's tail. That leaves the last
+      record beside the new tables and nothing for a later settle to find, and the first exits
+      non-zero. During the staging (measured after it): the second settle deletes the staging
+      directory as an unfinished write, `build.write_parquet_deterministic` recreates it for the next
+      table, and the first publish returns without an error. It has committed a record naming two
+      tables beside one. The windows are the staging and the renames, not the hour of fits, and the
+      docs now say to run one invocation per run at a time.
+      Size: quick-fix. Done when: `validate-state-model` holds an exclusive lock on its run from its
+      opening settle to the end of its publish, one that a kill releases (`fcntl.flock` on a lock
+      file, say). A second invocation must refuse with a named error before it settles anything, and
+      a test holding the lock sees the command refuse and the run's tree unchanged.
