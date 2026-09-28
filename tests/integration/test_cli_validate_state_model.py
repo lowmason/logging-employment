@@ -50,6 +50,8 @@ DAMAGE = {
     "summary_rewritten": {"mismatched": ["posterior_summary.parquet"]},
     "summary_is_a_directory": {"unreadable": ["posterior_summary.parquet"]},
 }
+# What a `validate-state-model` that failed or was killed partway can leave beside the outputs.
+LEFTOVERS = ("state_model_validation.partial", "state_model_validation.old")
 
 
 def _invoke(command: str, config: Path):
@@ -295,7 +297,8 @@ def test_a_report_that_cannot_be_read_is_refused_before_anything_is_deleted(
 
 def test_a_failed_fits_report_alone_is_written_up_as_not_beaten(make_staged_repo) -> None:
     """A failed gate writes its report and nothing else, by design, so the report alone is not an
-    unfinished fit: the command records the model as not beaten without a store (Decision 9)."""
+    unfinished fit: the command records the model as not beaten without a store (Decision 9). The
+    last validation's tables are replaced by none, never left beside a not-beaten record."""
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
     for table in COMPARAND_TABLES:
@@ -304,8 +307,64 @@ def test_a_failed_fits_report_alone_is_written_up_as_not_beaten(make_staged_repo
     (run / "posterior").mkdir()
     report = {"passed": False, "failures": ["parameter_rhat_max"], "constraint_set_hash": current}
     (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    (run / "state_model_validation").mkdir()
+    (run / "state_model_validation" / "validation_scores.parquet").write_text("from the last run")
     result = _invoke("validate-state-model", repo.config_path)
     assert result.exit_code == 0, result.output
     record = json.loads((run / "promotion_record.json").read_text())
     assert record["verdict"] == "not_beaten"
     assert record["gates"]["convergence"]["production_failures"] == ["parameter_rhat_max"]
+    assert list((run / "state_model_validation").iterdir()) == []
+    assert not any((run / leftover).exists() for leftover in LEFTOVERS)
+
+
+def test_an_unreadable_comparand_fails_before_anything_is_deleted(make_staged_repo) -> None:
+    """Every read now comes before the last validation is touched. The comparand's digests were
+    read after the deletion, so a comparand that could not be read cost the last record and its
+    tables. Each comparand table is a directory: it exists, so the precondition passes, and
+    reading it fails. The report records a failed gate, the path that scores nothing."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    for table in COMPARAND_TABLES:
+        (run / f"{table}.parquet").mkdir()
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    (run / "posterior").mkdir()
+    report = {"passed": False, "failures": ["parameter_rhat_max"], "constraint_set_hash": current}
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    earlier = (
+        run / "promotion_record.json",
+        run / "state_model_validation" / "validation_scores.parquet",
+    )
+    for path in earlier:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("from an earlier validation")
+    result = _invoke("validate-state-model", repo.config_path)
+    assert isinstance(result.exception, IsADirectoryError), result.exception
+    assert all(path.read_text() == "from an earlier validation" for path in earlier)
+    assert not any((run / leftover).exists() for leftover in LEFTOVERS)
+
+
+def test_a_store_that_cannot_be_read_fails_before_anything_is_deleted(
+    make_staged_repo, plant_finished_fit
+) -> None:
+    """`read_store` ran after the deletion, so a store that passed every check and still could not
+    be read cost the last record and its tables, as anything after it would have, the replicate
+    fits included. The planted store holds only its digest: `_unfinished_fit` accepts it, and
+    `read_store` then fails on it with `KeyError`."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    for table in COMPARAND_TABLES:
+        (run / f"{table}.parquet").write_text("a comparand")
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    plant_finished_fit(run, current)
+    earlier = (
+        run / "promotion_record.json",
+        run / "state_model_validation" / "validation_scores.parquet",
+    )
+    for path in earlier:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("from an earlier validation")
+    result = _invoke("validate-state-model", repo.config_path)
+    assert isinstance(result.exception, KeyError), result.exception
+    assert all(path.read_text() == "from an earlier validation" for path in earlier)
+    assert not any((run / leftover).exists() for leftover in LEFTOVERS)

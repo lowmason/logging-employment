@@ -58,7 +58,10 @@ unread, a fit whose report records a pass while its store, `posterior_summary.pa
 does not match (`cli.py::_unfinished_fit`): the report is written first, so an interrupted fit
 leaves a pass beside draws that were never written, and a file's existence does not prove it whole.
 Neither check raises on an artifact it cannot read, the report included: each refuses it, so
-`reconcile` still writes its verdict.
+`reconcile` still writes its verdict. `validate-state-model` touches nothing of the last validation
+until the new one is whole: its tables are staged and swapped in, and the record goes last
+(`cli.py::_publish_state_model_validation`), so a failure an hour into D1's 27 fits keeps the last
+record.
 
 Markers are declared but never applied by `addopts`: `slow` is on one unit test and EIGHT
 integration modules (seventeen `mark.slow` sites since plan 16, which added the three model

@@ -12,6 +12,8 @@ from .config import load_config
 if TYPE_CHECKING:  # annotations only; keeps CLI start-up cheap
     from collections.abc import Mapping
 
+    import polars as pl
+
     from .config import Config
 
 app = typer.Typer(add_completion=False, help="Monthly state Logging employment estimates.")
@@ -135,6 +137,37 @@ def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
+
+
+def _replace_directory(staged: Path, target: Path) -> None:
+    """Put `staged` where `target` is, and delete the old `target` only once `staged` is in place.
+
+    `_write_manifest`'s rule for one file, applied to a directory, which `os.replace` cannot move
+    over a non-empty one. So there are two renames, the old directory to a `.old` sibling and then
+    `staged` to `target`, and `.old` is deleted only after both. If the second rename fails, the
+    first is undone, so a failure here never leaves `target` missing. A kill between the two can,
+    and it leaves the old directory at `.old`, so the next swap moves it back before anything else
+    rather than deleting it as a leftover. A `.old` beside a `target` is the tail of a swap that
+    finished, and is deleted.
+    """
+    import os
+    import shutil
+
+    old = target.with_name(f"{target.name}.old")
+    if old.exists():
+        if target.exists():
+            shutil.rmtree(old)
+        else:
+            os.replace(old, target)
+    if target.exists():
+        os.replace(target, old)
+    try:
+        os.replace(staged, target)
+    except BaseException:
+        if old.exists():
+            os.replace(old, target)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
 
 
 def _input_digests(cfg: Config) -> dict[str, str]:
@@ -851,6 +884,50 @@ def validate_command(
         typer.echo(f"{regime} {entry['disposition']} scored={entry['n_scored']}")
 
 
+def _publish_state_model_validation(
+    run: Path,
+    record: Mapping[str, object],
+    *,
+    tables: Mapping[str, pl.DataFrame],
+    validation_manifest: Mapping[str, object] | None,
+) -> None:
+    """Replace `state_model_validation/`, then `promotion_record.json`, each only once it is whole.
+
+    The last validation is its record and its tables, and nothing of it is touched until the new
+    one is written. The tables and their manifest go to a `.partial` sibling, `_replace_directory`
+    swaps it in, and the record goes last, through `_write_manifest`. A failure while staging
+    removes the staged directory and leaves the last validation as it was. The record carries the
+    digests of the tables it describes (`model_validation_hashes`), so a failure between the swap
+    and the record, which leaves new tables beside the last record, shows as a mismatch. A failed
+    gate publishes no tables and no manifest: the last validation's tables are replaced by none,
+    never left beside a not-beaten record.
+    """
+    import shutil
+
+    from .build import write_parquet_deterministic
+
+    out = run / "state_model_validation"
+    staged = out.with_name(f"{out.name}.partial")
+    shutil.rmtree(staged, ignore_errors=True)
+    staged.mkdir(parents=True)
+    try:
+        hashes = {
+            table: write_parquet_deterministic(frame, staged / f"{table}.parquet")
+            for table, frame in tables.items()
+        }
+        if validation_manifest is not None:
+            _write_manifest(
+                staged / "validation_manifest.json",
+                {**validation_manifest, "output_hashes": hashes},
+            )
+            record = {**record, "model_validation_hashes": hashes}
+        _replace_directory(staged, out)
+    except BaseException:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+    _write_manifest(run / "promotion_record.json", record)
+
+
 @app.command("validate-state-model")
 def validate_state_model_command(
     config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
@@ -865,16 +942,15 @@ def validate_state_model_command(
     manifest records (`_unfinished_fit`). A production fit that failed §11.14 is recorded as not
     beaten without running the harness. Otherwise the model is scored through
     `run_pseudo_suppression`'s own loop (`StateModelProducer`), which is 27 fits on D1. Its tables
-    go to `state_model_validation/` and the verdict to `promotion_record.json`. Both
+    go to `state_model_validation/` and the verdict to `promotion_record.json`, and nothing of the
+    last validation is touched until both are whole (`_publish_state_model_validation`). Both
     verdicts exit 0, because "deploy the simpler method" is an outcome and not an error.
     """
     import hashlib
     import json
-    import shutil
 
     import polars as pl
 
-    from .build import write_parquet_deterministic
     from .contracts import (
         VALIDATION_METRIC_SCHEMA,
         VALIDATION_SCORE_SCHEMA,
@@ -926,10 +1002,11 @@ def validate_state_model_command(
             f"{diagnostics} records a passing fit, but its artifacts are not one finished fit "
             f"({_unfinished_reasons(unfinished)}). Run `fit-state-model` first"
         )
-    out = run / "state_model_validation"
-    shutil.rmtree(out, ignore_errors=True)
-    (run / "promotion_record.json").unlink(missing_ok=True)
-    out.mkdir(parents=True)
+    # NOTHING OF THE LAST VALIDATION IS TOUCHED UNTIL THE NEW ONE IS WHOLE. Every read, the harness
+    # and the verdict come first, and only `_publish_state_model_validation` writes. The last record
+    # and its tables were deleted here, so anything that failed after this point, from a comparand
+    # that could not be read to an interrupt an hour into D1's 27 fits, cost them (#43's known gap,
+    # of Codex's #41 class). Now such a failure leaves both byte for byte and raises as it did.
     envelope = {
         "run_id": rid,
         "model_version": MODEL_VERSION,
@@ -944,7 +1021,9 @@ def validate_state_model_command(
     production_gate = json.loads(diagnostics.read_text())
     if not production_gate["passed"]:
         record = production_failed_record(MODEL_ID, production_gate, cfg.promotion)
-        _write_manifest(run / "promotion_record.json", {**record, **envelope})
+        _publish_state_model_validation(
+            run, {**record, **envelope}, tables={}, validation_manifest=None
+        )
         typer.echo("production fit failed §11.14: not_beaten, section_10_8_hierarchy selected")
         return
 
@@ -967,18 +1046,6 @@ def validate_state_model_command(
     ):
         validate_frame(frame, schema, table)
         assert_required_columns_present(frame, table)
-    hashes = {
-        table: write_parquet_deterministic(frame, out / f"{table}.parquet")
-        for table, frame in (
-            ("validation_scores", result.scores),
-            ("validation_metrics", result.metrics),
-            ("validation_scoreboard", result.scoreboard),
-        )
-    }
-    _write_manifest(
-        out / "validation_manifest.json",
-        {**result.manifest, "estimators": [MODEL_ID], "output_hashes": hashes},
-    )
     record = evaluate_promotion(
         model_id=MODEL_ID,
         model_scores=result.scores,
@@ -995,7 +1062,14 @@ def validate_state_model_command(
         },
         promotion=cfg.promotion,
     )
-    _write_manifest(
-        run / "promotion_record.json", {**record, **envelope, "model_validation_hashes": hashes}
+    _publish_state_model_validation(
+        run,
+        {**record, **envelope},
+        tables={
+            "validation_scores": result.scores,
+            "validation_metrics": result.metrics,
+            "validation_scoreboard": result.scoreboard,
+        },
+        validation_manifest={**result.manifest, "estimators": [MODEL_ID]},
     )
     typer.echo(f"verdict {record['verdict']}; selected {record['selected_method']}")
