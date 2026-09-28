@@ -15,6 +15,7 @@ from ..constants import (
 from ..contracts import QCEW_NATIONAL_SIZE_SCHEMA
 from ..errors import (
     MissingCrossTabulationError,
+    SchemaMismatchError,
     UnknownDisclosureCodeError,
     UnknownSizeCodeError,
 )
@@ -56,7 +57,7 @@ def read_by_size_zip(raw: bytes) -> pl.DataFrame:
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         members = [n for n in archive.namelist() if n.endswith(".csv")]
         if len(members) != 1:
-            raise ValueError(f"expected one CSV member, found {members}")
+            raise SchemaMismatchError(f"expected one CSV member, found {members}")
         with archive.open(members[0]) as handle:
             frame = pl.read_csv(handle.read(), infer_schema_length=0)
     frame = frame.rename({k: v for k, v in BULK_TO_SLICE_COLUMNS.items() if k in frame.columns})

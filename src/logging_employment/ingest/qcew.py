@@ -27,7 +27,7 @@ from ..constants import (
     STATE_AREAS,
 )
 from ..contracts import QCEW_MONTHLY_SCHEMA
-from ..errors import UnknownDisclosureCodeError
+from ..errors import ConceptViolationError, SourceFetchError, UnknownDisclosureCodeError
 from .base import FetchedBytes, HttpFetcher
 
 SLICE_URL = "https://data.bls.gov/cew/data/api/{year}/{qtr}/industry/{industry}.csv"
@@ -87,7 +87,7 @@ def probe_slice_boundary(
         if response.http_status == 200 and response.content.strip():
             served.append(year)
     if not served:
-        raise ValueError(f"the slice route served no candidate year for industry {industry}")
+        raise SourceFetchError(f"the slice route served no candidate year for industry {industry}")
     return served[0]
 
 
@@ -192,7 +192,7 @@ def _check_dash_rows_carry_no_establishments(frame: pl.DataFrame) -> None:
         & (pl.col("qtrly_estabs").cast(pl.Int64, strict=False) > 0)
     )
     if offending.height:
-        raise ValueError(
+        raise ConceptViolationError(
             f"{offending.height} row(s) carry disclosure_code '-' with qtrly_estabs > 0; the "
             "true-zero rule rests on those two never co-occurring, so this run halts rather than "
             "guessing which reading is right"

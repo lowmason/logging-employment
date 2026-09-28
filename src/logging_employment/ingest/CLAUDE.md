@@ -81,9 +81,10 @@ The two QCEW tables do not share a column vocabulary (`size_class` vs `size_code
 | Census echoing a predicate column twice with disagreeing values | `SchemaMismatchError` | `cbp.py::_frame_from_rows` |
 | a stored metadata NAICS predicate that names no vintage (`NAICS<year>`) | `SchemaMismatchError` | `cbp.py::vintage_for_predicate` |
 | metadata serving zero or several NAICS predicates (a `_LABEL` variable is not one) | `SchemaMismatchError` | `cbp.py::discover_naics_predicate` |
-| `disclosure_code == "-"` with `qtrly_estabs > 0` (breaks the true-zero premise) | `ValueError` | `qcew.py::_check_dash_rows_carry_no_establishments` |
-| bulk-zip industry substring does not narrow to one member (`11331` hits `111331 Apple orchards`) | `ValueError` | `qcew.py::read_bulk_zip` |
-| by-size zip does not hold exactly one CSV; boundary probe served no year | `ValueError` | `qcew_size.py::read_by_size_zip`, `qcew.py::probe_slice_boundary` |
+| `disclosure_code == "-"` with `qtrly_estabs > 0` (breaks the true-zero premise, a §2.2 concept) | `ConceptViolationError` | `qcew.py::_check_dash_rows_carry_no_establishments` |
+| by-size zip does not hold exactly one CSV | `SchemaMismatchError` | `qcew_size.py::read_by_size_zip` |
+| boundary probe served no candidate year (an undeclared non-200, as `fetch`'s) | `SourceFetchError` | `qcew.py::probe_slice_boundary` |
+| bulk-zip industry substring does not narrow to one member (`11331` hits `111331 Apple orchards`) | `ValueError`, dead code: `D-049`'s delete-or-fix decides it, `D-140` left it | `qcew.py::read_bulk_zip` |
 
 `base.HttpFetcher` returns a non-200 rather than raising (project `CLAUDE.md` has the reason);
 `fetching.py` classifies it. Since R-S5P-4 a non-200 or empty body RAISES `SourceFetchError`
