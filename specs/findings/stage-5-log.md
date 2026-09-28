@@ -609,3 +609,15 @@ FAILED tests/unit/test_config_validation_block.py::test_the_promotion_keys_are_s
 - The dispositions of `D-116` and `D-115` (Decision 1). `D-116` is declined again, because a new
   propensity predictor would re-draw every regime's mask. `D-115` is not taken, because the model and
   the comparand are scored on one identification set.
+
+## 2026-09-28 — `/deferred` triage: the open-items list, reconciled
+
+The list in the Stage 5 `Consumes` names the open items whose own text names this stage.
+Plan 16's completion (`6768556`) closed `D-109` and filed `D-128` and `D-131`, both of which name
+it, and left the list as it was. A raw search also matches `D-090`, but only because
+`tests/unit/test_deferred_register.py` splits items at column-0 checkboxes, which parses the next
+section's intro into its body; its own text names no stage.
+
+**Superseded reading** (stage-block rule 1), replaced in the roadmap's Stage 5 `Consumes`:
+
+> Open items that name this stage: `D-109`, `D-115`, `D-116`.
