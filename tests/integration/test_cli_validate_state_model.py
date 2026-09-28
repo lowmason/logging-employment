@@ -292,6 +292,7 @@ def test_a_report_that_cannot_be_read_is_refused_before_anything_is_deleted(
     assert isinstance(result.exception, SystemExit), result.exception
     # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps the message.
     assert "fit-state-model" in result.output
+    assert "unrecorded" in result.output
     assert all(path.read_text() == "from an earlier validation" for path in earlier)
 
 

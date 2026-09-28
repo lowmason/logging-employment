@@ -595,6 +595,32 @@ def _stale_fit(run: Path) -> dict[str, str | None] | None:
     return {"fit_constraint_set_hash": fit, "constraint_set_hash": current}
 
 
+def _stale_reason(stale: Mapping[str, str | None]) -> str:
+    """`_stale_fit`'s finding as a clause and the command that clears it, claiming no more.
+
+    Two recorded sets that differ were reconciled apart. A missing one is something else: the
+    report or this run's `schema_manifest.json` is absent, cannot be read, or names no set. Both
+    commands said "reconciled against constraint set None" of it, which no fit ever was (#43's
+    follow-up). So it is "unrecorded", one word that Typer's box cannot wrap in two, and the remedy
+    starts at the command that writes the missing record.
+    """
+    fit, current = stale["fit_constraint_set_hash"], stale["constraint_set_hash"]
+    if current is None:
+        return (
+            "this run's constraint set is unrecorded (its schema_manifest.json is absent, cannot be "
+            "read, or names none). Run `build-constraints`, `solve-bounds` and `fit-state-model` first"
+        )
+    if fit is None:
+        return (
+            "the fit's constraint set is unrecorded (its report, posterior/diagnostics.json, is "
+            "absent, cannot be read, or names none). Run `fit-state-model` first"
+        )
+    return (
+        f"the fit was reconciled against constraint set {fit!r}, and this run's is {current!r}. "
+        "Run `solve-bounds` and `fit-state-model` first"
+    )
+
+
 def _unfinished_fit(run: Path) -> dict[str, list[str]] | None:
     """Why a passing fit's artifacts are not one finished fit, or `None` when they are.
 
@@ -746,12 +772,7 @@ def reconcile_command(
     elif stale is not None:
         state_model_passed = False
         payload["state_model"] = {**stale, "passed": False}
-        typer.echo(
-            "state-total draws not checked: the fit was reconciled against constraint set "
-            f"{stale['fit_constraint_set_hash']!r}, and this run's is "
-            f"{stale['constraint_set_hash']!r}. Run `solve-bounds` and `fit-state-model` first",
-            err=True,
-        )
+        typer.echo(f"state-total draws not checked: {_stale_reason(stale)}", err=True)
     elif store.exists():
         from .models.arviz_io import draws_digest, read_store, store_digest
         from .models.reconciliation import check_reconciled
@@ -990,12 +1011,7 @@ def validate_state_model_command(
     # deletion lost that record whenever the store had never been written (Codex on #41).
     stale = _stale_fit(run)
     if stale is not None:
-        raise typer.BadParameter(
-            f"{diagnostics} records constraint set {stale['fit_constraint_set_hash']!r}, but "
-            f"{run / 'schema_manifest.json'} names {stale['constraint_set_hash']!r}: the fit was "
-            "reconciled against another constraint set. Run `solve-bounds` and `fit-state-model` "
-            "first"
-        )
+        raise typer.BadParameter(f"the state-total model is not scored: {_stale_reason(stale)}")
     unfinished = _unfinished_fit(run)
     if unfinished is not None:
         raise typer.BadParameter(
