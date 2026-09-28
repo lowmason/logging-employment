@@ -58,7 +58,13 @@ def test_a_label_variable_is_not_mistaken_for_the_predicate() -> None:
 
 def test_ambiguous_metadata_fails_closed_rather_than_picking_one() -> None:
     variables = {"variables": {"NAICS2017": {}, "NAICS2012": {}}}
-    with pytest.raises(ValueError, match="exactly one NAICS predicate"):
+    with pytest.raises(SchemaMismatchError, match="exactly one NAICS predicate"):
+        cbp.discover_naics_predicate(variables)
+
+
+def test_metadata_serving_only_a_label_has_no_predicate_and_fails_closed() -> None:
+    variables = {"variables": {"NAICS2017_LABEL": {}, "EMP": {}}}
+    with pytest.raises(SchemaMismatchError, match="exactly one NAICS predicate"):
         cbp.discover_naics_predicate(variables)
 
 

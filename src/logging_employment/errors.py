@@ -117,7 +117,12 @@ class UniverseClosureError(LoggingEmploymentError):
 
 
 class InfeasibleResidualError(LoggingEmploymentError):
-    """§12.3's summed bounds exclude the residual, so no feasible scaling exists."""
+    """§12.3's summed bounds exclude the residual, so no feasible scaling exists.
+
+    `reconcile.integerize` raises it for §12.6's three integer refusals (`D-119`): a lower bound
+    above its cap, lower bounds summing past the total, and caps summing short of it. Each leaves no
+    integer allocation inside the bounds that sums to the total (`D-139`).
+    """
 
 
 class WeightDomainError(LoggingEmploymentError):

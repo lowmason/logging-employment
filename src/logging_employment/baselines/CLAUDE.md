@@ -72,11 +72,13 @@ turns §7.10's `deterministic_bounds` table into it, keyed by the seven-field `c
 `state_fips`, and `runner.month_bounds` projects one month's missing set onto the bare-state keys
 `scale_into_bounds` and `integerize` read. A month §12.2's `allocate` keeps inside every interval
 is left bit-identical; a month it does not is reallocated by §12.3's `scale_into_bounds`, and
-§12.6's integers are cut to the same bounds. Two raises remain: `InfeasibleResidualError` when a
-month's bounds cannot hold its residual, and `errors.BoundViolationError` if a value still escapes
-after scaling — a defect, never a `Decline` row. `cli.py` passes the run directory's bounds;
-`validate/harness.py` passes `MaskedSystem.bounds`, never the run directory's (`D-087`, see
-`validate/CLAUDE.md`).
+§12.6's integers are cut to the same bounds. Three raises remain: `InfeasibleResidualError` when a
+month's bounds cannot hold its residual, `InfeasibleResidualError` again from `integerize` when it
+cannot place the integer total inside the integer cut of those bounds, and
+`errors.BoundViolationError` if a value still escapes after scaling — a defect, never a `Decline`
+row. `cli.py` passes the run
+directory's bounds; `validate/harness.py` passes `MaskedSystem.bounds`, never the run directory's
+(`D-087`, see `validate/CLAUDE.md`).
 
 Consumers outside this package: `validate/harness.py` imports `Estimator` and
 `runner.{REGISTRY, run_baselines, state_total_bounds}`; `validate/scoreboard.py` imports

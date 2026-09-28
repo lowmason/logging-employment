@@ -402,11 +402,12 @@ def run_baselines(
     `reconciliation.single_margin_method` names, so an estimate is moved INTO its interval rather
     than a run halting on it. Three refusals remain, all raises. `InfeasibleResidualError` when a
     month's bounds cannot hold its residual at all: unreachable on D1, where no month has every
-    missing cell bounded above (measured 2026-09-12, at most 7 of 9). `integerize`'s `ValueError`
-    when the integer cut of those bounds cannot hold the integer total, which takes a fractional
-    bound. And `BoundViolationError` if a value still escapes after scaling, which would be a defect
-    here rather than a property of an estimator. §12.6's integers are cut to the same bounds, so the
-    number actually published honours the interval too.
+    missing cell bounded above (measured 2026-09-12, at most 7 of 9). `InfeasibleResidualError`
+    again, from `integerize`, when it cannot place the integer total inside the integer cut of
+    those bounds, which takes a fractional bound. And `BoundViolationError` if a value still
+    escapes after scaling, which would be a defect here rather than a property of an estimator.
+    §12.6's integers are cut to the same bounds, so the number actually published honours the
+    interval too.
     """
     partitions = observed_partition(data.qcew_monthly)
     audit = closure_audit(data.qcew_monthly, partitions)
