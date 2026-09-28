@@ -930,6 +930,17 @@ which is why none was folded into the batch. See specs/plans/completed/7-p3-test
       sites is part of the work, not a precondition for it.
       Size: design. Done when: every live site carries either a run-time-derived share or an
       explicitly dated measured-on-D1 marker -- one decision per site, not one rule.
+      **Inventory shrank 2026-09-28 (/deferred triage): three undated sites remain.** Plan 15 took
+      the count out of five sites when `D-111` made the null-upper figure false:
+      `reconcile/scaling.py`, `tests/unit/test_scaling.py` and `tests/unit/test_reconcile_properties.py`
+      in `8bf57e5`, and `baselines/runner.py::state_total_bounds` and
+      `tests/unit/test_baselines_bounds.py` in `51b1777`. This item's grep, re-run, finds four lines.
+      Two are undated live claims: `baselines/simple.py:4`, and
+      `tests/unit/test_baselines_runner.py:148`, which says "today" but gives no date.
+      `models/CLAUDE.md:57` sits under "Measured on D1 on 2026-09-27", so it meets the condition, and
+      `reconcile/CLAUDE.md:155` cites this item, not the count. The grep misses the comma-less form:
+      `tests/unit/test_qcew_parser.py:69` scopes a comment to "all 1227 cells" and credits it to an
+      earlier stage's measurement without a date.
 
 
 ## unregistered-work audit — 2026-09-07
@@ -1097,6 +1108,12 @@ access. Live roadmap stages remain out of scope per this file's header rule.
       populated. Needs a ruling on whether the marker is aspirational (delete it) or load-bearing
       (apply it and wire the deselection), and a separate one on whether this repo wants CI.
       Size: design. Done when: the `network` marker is deleted or applied and deselected in `addopts`, and the separate CI question is recorded either way.
+      **Superseded in part 2026-09-28 (/deferred triage): the CI half is closed.** `fe895b1`
+      (2026-09-13) added `.github/workflows/ci.yml`, which runs the documented gates on every push to
+      `main` and every PR, with pytest as `-m "not slow and not network"`; its header records that no
+      test carries `network`. The marker half is untouched: `addopts` is still
+      `--import-mode=importlib` alone and no test applies the marker, so the item stays open on that
+      half. CI's `-m` expression now names the marker, so deleting it should drop it there too.
 
 - [ ] `D-066` **The 24 pre-existing `ruff` violations in `scripts/audit/` are scoped out twice and tracked
       by no item.** The ticked `ruff I001` item at `:243` closes with "The remaining 24 (ISC004,
@@ -1247,7 +1264,23 @@ access. Live roadmap stages remain out of scope per this file's header rule.
       the zero clip, so an incremental form would remove another factor of n. Revisit if
       `replicates_per_regime` is raised from 3 seeds toward Appendix A's 20 replicates, where the
       plan's ~2.2 h estimate applies.
-      Size: plan. Revisit if: `replicates_per_regime` is raised from 3 seeds toward Appendix A's 20 replicates, where the plan's ~2.2 h estimate applies.
+      Size: plan. Revisit if: either knob grows the harness's cost -- `validation.pseudo_suppression_seeds`
+      growing from its three seeds toward the 20 replicates plan 11 priced (one pass per seed, so
+      linear), or `validation.replicates_per_regime` rising above 20 (it caps each pass's targets, and
+      CRPS is superlinear in a pass's scored-cell count, the n the incremental form would cut).
+      **Correction 2026-09-28 (/deferred triage): this line meant the seed list, but named a key
+      already at 20.** It read, as the sentence above still does, "`replicates_per_regime` is raised
+      from 3 seeds toward Appendix A's 20 replicates, where the plan's ~2.2 h estimate applies". Its
+      "3 seeds" is the harness's loop, one pass per entry of `validation.pseudo_suppression_seeds`
+      (`validate/harness.py::run_pseudo_suppression`), still `[1024, 2048, 4096]`; spec §7.14 defines
+      `replicate` as that seed's index. `replicates_per_regime` has read 20 in `config.yaml` since
+      `69e6d8f` (2026-09-07), so read literally the trigger had already fired. It is the second knob,
+      not a synonym: it caps the targets a regime's selector draws (`validate/regimes.py`, through
+      `propensity.sample_targets`), which sizes the within-replicate ensemble behind CRPS's cost.
+      Appendix A declares no replicate count. The 20 is plan 11's own (its evidence §4: "13 regimes ×
+      20 replicates ≈ 2.2 hours"), priced at ~30 s a pass before the sorted-ensemble CRPS.
+      `harness.py`'s module docstring records the same misreading, corrected, and `validate/CLAUDE.md`
+      states the rule.
 - [x] `D-073` **`validation_scores` / `validation_metrics` are written without `validate_frame`.**
       → done in plan 12 (2026-09-09). `cli.py::validate_command` now gates all THREE persisted
       validation tables — `validation_scoreboard` was ungated too, and undeclared — on both
@@ -1885,6 +1918,14 @@ the event that makes it reachable rather than a date.
       Size: plan. Revisit if: Stage 8 builds the §18.1 provenance package, which is the first
       consumer that needs the declared key -- or sooner, if `source_publication_date` (`D-100`) is
       populated, since both fixes touch the same three call sites.
+      **Correction 2026-09-28 (/deferred triage): the second arm is spent, and its premise was
+      wrong.** `D-100` closed alone on 2026-09-12. Its fix, `e01201c`, changed the three producer
+      sites in `fetching.py`, while this item's sites are the parser calls in `build.py`, so the two
+      fixes never shared a call site. The date is populated where it can be: the 32 `qcew_parent`
+      rows fetched 2026-09-13 carry it, and the 47 rows fetched before the fix keep `""`. Only the
+      first arm still watches. The defect has also gained a fourth site: `fdcd6ee` (plan 15) passes
+      `snapshot_id=path.stem` to `build.py::state_parent_rows`, which stamps the stem as
+      `release_vintage` too.
 
 - [x] `D-095` **`ExponentiallyWeightedShare` discounts per OBSERVATION while its docstring claims a
       one-year half-life.** `baselines/historical.py` computes `weights = [self.decay **
