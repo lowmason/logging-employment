@@ -397,8 +397,10 @@ def fit_state_model_command(
     `posterior/diagnostics.json` is written BEFORE the gate is enforced, so a failure keeps its
     evidence. The command then exits 1 and writes no store, no summary and no manifest.
     `validate-state-model` reads the report and records the model as not beaten without scoring it.
-    The report names the constraint set the draws were reconciled against, and both commands that
-    read a fit compare it with the run's own first (`_stale_fit`).
+    A pass writes the store, the summary and, last, the manifest, so a passing report does not by
+    itself prove the fit finished: both commands that read a fit check all three are there
+    (`_unfinished_fit`). The report names the constraint set the draws were reconciled against, and
+    both compare it with the run's own first (`_stale_fit`).
     """
     import json
     import shutil
@@ -535,6 +537,30 @@ def _stale_fit(run: Path) -> dict[str, str | None] | None:
     return {"fit_constraint_set_hash": fit, "constraint_set_hash": current}
 
 
+def _unfinished_fit(run: Path) -> list[str] | None:
+    """What a passing fit never wrote, run-relative, or `None` when no passing fit is unfinished.
+
+    `fit-state-model` writes `posterior/diagnostics.json` first, gate passed or not, so a failure
+    keeps its evidence. A pass then writes the store, `posterior_summary.parquet` and
+    `state_model_manifest.json`. So a fit interrupted after its report leaves `"passed": true`
+    beside draws that were never written (Codex on #41). `validate-state-model` deleted the last
+    promotion record and only then failed to read the store, and `reconcile`, which keyed on the
+    store alone, read such a run as having no fit. Both call this after `_stale_fit` and refuse the
+    fit unread. All three artifacts are required, not only the one written last, so reordering
+    those writes cannot weaken the check. No report is no fit, and a failed report writes no store
+    by design: both are `None`.
+    """
+    import json
+
+    from .models.interfaces import STORE_PATH
+
+    report = run / "posterior" / "diagnostics.json"
+    if not report.exists() or json.loads(report.read_text()).get("passed") is not True:
+        return None
+    artifacts = (STORE_PATH, "posterior_summary.parquet", "state_model_manifest.json")
+    return [artifact for artifact in artifacts if not (run / artifact).exists()] or None
+
+
 @app.command("reconcile")
 def reconcile_command(
     config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
@@ -583,13 +609,25 @@ def reconcile_command(
     # `fit-state-model` checked the draws it held in memory; this reads the file back, so a defect
     # in writing it cannot pass unseen. The key is OMITTED, never null, before a fit exists, so a
     # baseline-only run writes the keys it always wrote. A fit from another constraint set fails
-    # unread: its draws hold to that set's bounds, so checking them would pass (`_stale_fit`).
+    # unread: its draws hold to that set's bounds, so checking them would pass (`_stale_fit`). So
+    # does a passing fit that did not finish writing (`_unfinished_fit`): keyed on the store alone,
+    # a run whose store never landed read as having no fit at all.
     from .models.interfaces import STORE_PATH
 
     state_model_passed = True
     store = run / STORE_PATH
     stale = _stale_fit(run) if store.exists() else None
-    if stale is not None:
+    unfinished = _unfinished_fit(run) if stale is None else None
+    if unfinished is not None:
+        state_model_passed = False
+        payload["state_model"] = {"missing": unfinished, "passed": False}
+        typer.echo(
+            "state-total draws not checked: the fit's report records a pass, but it is missing "
+            f"{', '.join(unfinished)}, so `fit-state-model` did not finish. "
+            "Run `fit-state-model` first",
+            err=True,
+        )
+    elif stale is not None:
         state_model_passed = False
         payload["state_model"] = {**stale, "passed": False}
         typer.echo(
@@ -739,8 +777,9 @@ def validate_state_model_command(
     Not in §16.1's list: plan 16 adds it so `validate` stays the comparand's command, byte-identical
     to Stage 4's. The comparand is this run's own `validate` output. The precondition is that
     output, plus `fit-state-model`'s `posterior/diagnostics.json` from this run's constraint set:
-    a fit from another is refused before anything is deleted (`_stale_fit`). A production fit that
-    failed §11.14 is recorded as not beaten without running the harness. Otherwise the model is
+    a fit from another is refused before anything is deleted (`_stale_fit`), and so is a passing
+    fit that never finished writing its store, summary and manifest (`_unfinished_fit`). A
+    production fit that failed §11.14 is recorded as not beaten without running the harness. Otherwise the model is
     scored through `run_pseudo_suppression`'s own loop (`StateModelProducer`), which is 27 fits on
     D1. Its tables go to `state_model_validation/` and the verdict to `promotion_record.json`. Both
     verdicts exit 0, because "deploy the simpler method" is an outcome and not an error.
@@ -786,7 +825,9 @@ def validate_state_model_command(
                 f"and reads its production gate. Run `{command}` first"
             )
     # Before the gate is read and before anything is deleted: a stale fit is neither scored nor
-    # written up as not beaten, and the last record survives the refusal.
+    # written up as not beaten, a passing fit that did not finish is not scored, and the last
+    # record survives either refusal. Reading the store only after the deletion lost that record
+    # whenever the store had never been written (Codex on #41).
     stale = _stale_fit(run)
     if stale is not None:
         raise typer.BadParameter(
@@ -794,6 +835,12 @@ def validate_state_model_command(
             f"{run / 'schema_manifest.json'} names {stale['constraint_set_hash']!r}: the fit was "
             "reconciled against another constraint set. Run `solve-bounds` and `fit-state-model` "
             "first"
+        )
+    unfinished = _unfinished_fit(run)
+    if unfinished is not None:
+        raise typer.BadParameter(
+            f"{diagnostics} records a passing fit, but it is missing {', '.join(unfinished)}: "
+            "`fit-state-model` did not finish. Run `fit-state-model` first"
         )
     out = run / "state_model_validation"
     shutil.rmtree(out, ignore_errors=True)
