@@ -1070,7 +1070,8 @@ def _publish_state_model_validation(
 
     Any exception is raised as it was, once `_settle_state_model_validation` has left one whole
     validation: the last, byte for byte, unless the record's rename ran, and the new one if it
-    did. A kill anywhere leaves leftovers that the next `validate-state-model` settles before it
+    did. If the settle fails too, its error is raised instead, with the original as its context,
+    and the next call settles what it left. A kill anywhere leaves leftovers that the next `validate-state-model` settles before it
     reads anything. Until then, a kill between the first rename and the commit leaves the last
     record beside new tables, or none, and nothing in this package reads `state_model_validation/`.
     An interrupt after the commit exits non-zero with the new validation published. Nothing is
@@ -1166,9 +1167,11 @@ def validate_state_model_command(
         (diagnostics, "fit-state-model"),
     ]:
         if not path.exists():
+            # The file is named run-relative, as a word of its own: Typer's box folds a word
+            # longer than its width, so an absolute path's file name can split across two lines.
             raise typer.BadParameter(
-                f"{path} is missing: §13.10 compares the model against this run's own comparand "
-                f"and reads its production gate. Run `{command}` first"
+                f"{path.relative_to(run)} is missing from {run}: §13.10 compares the model against "
+                f"this run's own comparand and reads its production gate. Run `{command}` first"
             )
     # Before the gate is read and before anything is deleted: a stale fit is neither scored nor
     # written up as not beaten, a passing fit whose artifacts are not one finished fit is not
@@ -1205,10 +1208,13 @@ def validate_state_model_command(
         },
     }
     # WHICH FIT the verdict describes (#44). `fit-state-model` can re-run on this run after the
-    # record is written, and nothing in the record said which fit it was. The report is read once,
-    # so the gate is parsed from the bytes the fit is identified by. A failed gate writes no draws,
-    # and the passing branch adds the digest of the draws it checked. Nothing in this package
-    # compares these with a later fit yet; they make the record answerable.
+    # record is written, and nothing in the record said which fit it was. The gate and the digest
+    # the record carries come from one read of the report, so the gate is parsed from the bytes the
+    # fit is identified by. `_stale_fit` and `_unfinished_fit` read it before, each on its own, so a
+    # report replaced between their checks and this read goes unnoticed: nothing locks a run, as
+    # nothing serialises two publishes. A failed gate writes no draws, and the passing branch adds
+    # the digest of the draws it checked. Nothing in this package compares these with a later fit
+    # yet; they make the record answerable.
     report = diagnostics.read_bytes()
     production_gate = json.loads(report)
     fit = {

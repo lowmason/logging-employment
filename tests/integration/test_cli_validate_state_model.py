@@ -400,6 +400,8 @@ def test_the_command_requires_validates_manifest(make_staged_repo) -> None:
     result = _invoke("validate-state-model", repo.config_path)
     assert isinstance(result.exception, SystemExit), result.exception
     # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps the message.
+    # The file is named run-relative for this reason: inside an absolute path, how the box folds
+    # it depends on how long the temporary directory's path is.
     assert "validation_manifest.json" in result.output
     assert "missing" in result.output
 
