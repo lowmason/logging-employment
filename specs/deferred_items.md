@@ -2778,3 +2778,60 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       holds the lock sees the command refuse and every byte of the run unchanged, and the next two
       invocations settle once it is released. A run directory that does not exist is not created
       to be locked. The suite with `data/` went from 1775 to 1777 passed, 47 deselected.
+
+## D-119 review — 2026-09-28
+
+Filed from the independent review of the `D-119` quick fix. `D-139` is a check that fix's new
+docstrings first described honestly, and which predates it: two skeptics confirmed it and it was
+reproduced by hand. `D-140` is the rule `D-119` applied at four sites without anything saying which
+refusals it covers.
+
+- [ ] `D-139` **`integerize` refuses a feasible input when the cells' floors, raised to their lower
+      bounds, sum past the total.** `reconcile/integerize.py::integerize` seats each cell at
+      `max(floor(value), lower)`, capped, and raises `InfeasibleResidualError` when the seats sum past
+      `total`. A floor is not a bound, so a cell seated at its floor can give a unit back:
+      `{"a": 1.01, "b": 1.01, "c": 5.98}` at `total=8` with `lower={"a": 2, "b": 2}` seats 2, 2 and 5
+      and is refused, though 2, 2 and 4 satisfies every bound and sums to 8. The message then calls
+      the seat sum, 9, "summed integer lower bounds", where the lower bounds sum to 4. Latent on D1:
+      a lower bound at or below a value is at or below its floor only when the bound is an integer,
+      and D1's bounds are (0 fractional endpoints of 5,531 rows in `runs/dd7337e89047` and
+      `runs/4cf47a918dd8`, measured 2026-09-28). A fractional lower bound reaches `integerize` only
+      through `baselines.runner.integer_bounds` on a non-integer interval, which
+      `constraints.enforce_integrality: false` allows (`D-032`). It went unwitnessed because
+      `test_every_feasible_bounded_input_places_all_its_units` draws upper caps and never a lower
+      bound. §12.6 already admits the fix: step 3 allows "a controlled-rounding optimizer" and step 4
+      requires respecting "deterministic lower and upper integer bounds", so handing a unit back needs
+      no spec amendment. Beside it, `test_a_contradictory_bound_pair_is_refused`'s docstring says
+      "D1 has `lower=0, upper=None` throughout", false since plan 15 cut finite bounds into the
+      integer release.
+      Size: quick-fix. Done when: `integerize` refuses only a lower bound above its cap, summed lower
+      bounds above `total`, or caps that cannot hold `total`, and otherwise hands units back from cells
+      above their lower bound in the reverse of placement order; the feasibility sweep draws lower
+      bounds and failed first against the old check; the `integerize.py` and `errors.py` docstrings and
+      the refusal message describe the new check; and that stale test docstring is corrected.
+- [ ] `D-140` **The fail-closed rule does not say which refusals it covers, and ten data-triggered
+      refusals still raise `ValueError`.** Root `CLAUDE.md`'s "Fail closed with a named error" bullet
+      says every class in `errors.py` subclasses `LoggingEmploymentError` and carries the offending
+      value, but not which refusals must raise one. `src/` holds 37 `raise ValueError` (measured
+      2026-09-28, after `D-119`, `rg -c 'raise ValueError' src/`), most of them legitimate, so reviews
+      flag them a site at a time: `D-119` converted four. Rule (ruled 2026-09-28): a named `errors.py`
+      error for any refusal data can trigger -- source bytes, fetched metadata, staged tables, or the
+      run's own state (§18.3) -- and `ValueError` for a caller misusing the API, where it must also
+      stay in pydantic validators, which turn only `ValueError` and `AssertionError` into a
+      `ValidationError`. Under that rule, NAME: `ingest/qcew.py::probe_slice_boundary` (served no
+      year; `SourceFetchError`), `ingest/qcew.py::_check_dash_rows_carry_no_establishments`,
+      `ingest/qcew_size.py::read_by_size_zip` (`SchemaMismatchError`), the four premises in
+      `harmonize/naics.py::assert_113310_survives_the_window`, `harmonize/bridge.py::bridge_frame`,
+      `baselines/runner.py::preferred_estimator` (no §10.8 fallback estimator produced an estimate,
+      the one site a run can reach), and `validate/regimes.py::select_targets`. KEEP: `config.py` x3
+      (pydantic validators), `constraints/rows.py` x11 (argument checks in `_check_relation` and
+      `constraint`), `reconcile/draws.py::reconcile_draws`,
+      `reconcile/projection.py::_require_indicator_margins`, `disclosure/flags.py::build_flags`,
+      `fetching.py::fetch_source`, `build.py::build_harmonized`, `ingest/base.py::HttpFetcher`. DECIDE
+      in the sweep: `reconcile/scaling.py::Bounds`' inverted pair (`solve_bounds` refuses an
+      infeasible component first, so this is probably misuse), `classification.py` x4 (the spec file
+      is repo content), `store.py::assert_no_secret`. `ingest/qcew.py::read_bulk_zip` is excluded:
+      `D-049`'s delete-or-fix decides it. Re-count before starting; the inventory is dated.
+      Size: plan. Done when: root `CLAUDE.md`'s fail-closed bullet states which refusals take a named
+      error and which keep `ValueError`, every site the rule assigns a named error raises one with its
+      test updated, and `ingest/CLAUDE.md`'s fail-closed table matches.
