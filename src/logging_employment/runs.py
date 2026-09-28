@@ -4,13 +4,22 @@
 make each invocation land in a new directory, so "idempotent" could only ever mean "wrote the same
 bytes somewhere else". Deriving the id from the resolved configuration and the input digests makes
 a repeated run land on its own previous output, where byte-identity is checkable.
+
+Also here: `replace_whole`, how a file under §6.2's roots is written to a `.partial` sibling and
+renamed into place, so a reader finds the last whole file or the new one and never one cut short
+(`D-134`). It lives here rather than beside `build.write_parquet_deterministic` because the raw
+store and the source manifest write no Parquet through that writer, and this module costs them only
+`config`. `cli.py`'s manifest writer and its staged publish name their siblings through
+`partial_path` too, so an unfinished write looks the same everywhere and no reader opens one.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+import os
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 
 from .config import Config, resolved_dict
@@ -52,6 +61,41 @@ def run_id(
 def run_dir(config: Config, identifier: str) -> Path:
     """The directory this run's outputs belong in."""
     return Path(config.storage.output_uri) / identifier
+
+
+def partial_path(path: Path) -> Path:
+    """The sibling a file or directory is written to before it is renamed over `path`.
+
+    One name for every such sibling, so the manifest writer, the staged promotion record, the
+    staged validation tables, the raw store and the source manifest agree on what an unfinished
+    write looks like. No reader opens one: every reader names its file in full or globs a suffix
+    (`*.parquet`, `*.csv`), which `.partial` never matches.
+    """
+    return path.with_name(f"{path.name}.partial")
+
+
+@contextmanager
+def replace_whole(path: Path) -> Iterator[Path]:
+    """Yield `path`'s `.partial` sibling to write to, and rename it over `path` on a clean exit.
+
+    `Path.write_bytes`, `Path.write_text` and polars' `write_parquet` all truncate before they
+    write, so a full disk or a kill mid-write left the file cut short where readers look
+    (`D-134`): a raw object whose path claimed a digest its bytes did not have, and which every
+    later `put` then reported present; a `runs/source_manifest.parquet` that failed to parse, and
+    with it the record of which snapshots a run used; a `config.resolved.yaml` half written.
+    `os.replace` is atomic within a directory, so a reader sees the last whole file or the new one
+    and never a mix, which is what `cli._write_manifest` already did for every run manifest. A
+    write that raises removes its sibling. A process killed outright can leave one, and the next
+    write to the path overwrites it. Nothing is fsynced: this is atomic against a process that
+    dies, not a machine that does, the limit `cli._publish_state_model_validation` states too.
+    """
+    partial = partial_path(path)
+    try:
+        yield partial
+        os.replace(partial, path)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
 
 
 UNKNOWN_PROVENANCE = "unknown"

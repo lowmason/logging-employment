@@ -2,14 +2,31 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 
 import polars as pl
+import pytest
 from typer.testing import CliRunner
 
 from logging_employment.cli import app
+from logging_employment.constraints import rows as constraint_rows
 
 runner = CliRunner()
+
+
+def _rebuild_on_a_changed_system(config: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`build-constraints` again under the same run id, on a system a code change altered.
+
+    The integrality rows are gone, as a change to `constraints/rows.py` could leave them. `run_id`
+    covers config and inputs, not code, so the new `schema_manifest.json` lands beside the bounds
+    and results the old constraint set produced.
+    """
+    monkeypatch.setattr(constraint_rows, "integrality_rows", lambda cells_frame: [])
+    result = runner.invoke(app, ["build-constraints", "--config", str(config)])
+    monkeypatch.undo()
+    assert result.exit_code == 0, result.output
 
 
 def test_run_baselines_writes_results_and_a_sibling_manifest(staged_repo) -> None:
@@ -172,3 +189,100 @@ def test_the_production_path_scales_an_estimate_into_a_finite_upper_below_it(sta
     )
     assert rerun["estimate"].item() <= row["estimate"] / 2.0 < row["estimate"]
     assert rerun["estimate_integer"].item() <= row["estimate"] / 2.0
+
+
+def test_run_baselines_refuses_bounds_solved_against_another_constraint_set(
+    staged_repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-130`. `fit-state-model` refused bounds whose `constraint_set_hash` was not the manifest's;
+    `run-baselines` compared nothing, checked every estimate against the old bounds and stamped
+    `baseline_results` with the manifest's new hash. It refuses the same way now, before it writes,
+    so the last results and their manifest survive the refusal."""
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    results = run / "baseline_results" / "baseline_results.parquet"
+    manifest = run / "baseline_manifest.json"
+    before = (results.read_bytes(), manifest.read_bytes())
+    _rebuild_on_a_changed_system(staged_repo.config_path, monkeypatch)
+    # The control: the rebuild did move the constraint set out from under the solved bounds.
+    schema = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    solved = set(pl.read_parquet(run / "deterministic_bounds.parquet")["constraint_set_hash"])
+    assert solved != {schema}
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code != 0
+    # Short tokens only, as `test_run_baselines_refuses_a_run_with_no_solved_bounds` explains.
+    assert "solve-bounds" in result.output
+    assert "build-constraints" in result.output
+    assert (results.read_bytes(), manifest.read_bytes()) == before
+
+
+def test_reconcile_refuses_results_rewritten_since_run_baselines(staged_repo) -> None:
+    """`D-135`. `reconcile` checked only that `baseline_results.parquet` existed, so it verified
+    whatever was there: a file rewritten since, or one a `run-baselines` that failed before its
+    manifest left. `run-baselines` records the digest of the results it writes in
+    `baseline_manifest.json`, and results with another digest are refused as a precondition, with
+    no verdict written."""
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    path = run / "baseline_results" / "baseline_results.parquet"
+    recorded = hashlib.sha256(path.read_bytes()).hexdigest()
+    # The same rows, other bytes: polars' default compression against the deterministic writer's.
+    pl.read_parquet(path).write_parquet(path)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() != recorded
+    result = runner.invoke(app, ["reconcile", "--config", str(staged_repo.config_path)])
+    assert result.exit_code != 0
+    assert "run-baselines" in result.output
+    assert "baseline_results.parquet" in result.output
+    assert not (run / "reconcile_manifest.json").exists()
+
+
+def test_reconcile_refuses_results_from_another_constraint_set(
+    staged_repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-135`. After `build-constraints` re-runs under the same id, the persisted results were
+    produced against a constraint set the run no longer has, and `reconcile` verified them anyway.
+    Every row carries the set it was produced under, and a set that is not the manifest's is
+    refused, naming the command that ran out of order."""
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code == 0, result.output
+    _rebuild_on_a_changed_system(staged_repo.config_path, monkeypatch)
+    result = runner.invoke(app, ["reconcile", "--config", str(staged_repo.config_path)])
+    assert result.exit_code != 0
+    assert "run-baselines" in result.output
+    assert "build-constraints" in result.output
+    assert not (staged_repo.run_dir / "reconcile_manifest.json").exists()
+
+
+def test_reconcile_hashes_the_bytes_it_verifies(
+    staged_repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-135`. The verdict's `baseline_results_sha256` came from a second read of the path, after
+    the parse, so a rewrite between the two recorded a digest of rows the verdict never saw. The
+    file is rewritten the moment it has been parsed, as `run-baselines` re-run beside the command
+    would rewrite it, and the recorded digest is still of the bytes that were verified. The rewrite
+    hangs on `pl.read_parquet`, so the test also asserts it fired once: parsing by any other route
+    would never trigger it, and pass."""
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    path = run / "baseline_results" / "baseline_results.parquet"
+    verified = hashlib.sha256(path.read_bytes()).hexdigest()
+    read_parquet = pl.read_parquet
+    parsed: list[object] = []
+
+    def then_rewritten(source: object, *args: object, **kwargs: object) -> pl.DataFrame:
+        frame = read_parquet(source, *args, **kwargs)
+        parsed.append(source)
+        frame.write_parquet(path)
+        return frame
+
+    monkeypatch.setattr(pl, "read_parquet", then_rewritten)
+    result = runner.invoke(app, ["reconcile", "--config", str(staged_repo.config_path)])
+    monkeypatch.undo()
+    assert result.exit_code == 0, result.output
+    assert len(parsed) == 1
+    manifest = json.loads((run / "reconcile_manifest.json").read_text())
+    assert manifest["baseline_results_sha256"] == verified
+    assert hashlib.sha256(path.read_bytes()).hexdigest() != verified

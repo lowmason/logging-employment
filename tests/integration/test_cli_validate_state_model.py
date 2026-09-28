@@ -276,7 +276,9 @@ def test_a_fit_from_another_constraint_set_is_refused_before_anything_is_deleted
 
 
 @pytest.mark.parametrize("written", list(INTERRUPTIONS.values()), ids=list(INTERRUPTIONS))
-def test_an_unfinished_fit_is_refused_before_anything_is_deleted(make_staged_repo, written) -> None:
+def test_an_unfinished_fit_is_refused_before_anything_is_deleted(
+    make_staged_repo, fit_report, written
+) -> None:
     """Codex on #41. `fit-state-model` writes its passing report first, so a fit interrupted after
     it leaves `"passed": true` beside artifacts that were never written. The command deleted the last
     record and only then failed to read the store, losing a validation of 27 fits. It must refuse
@@ -285,10 +287,8 @@ def test_an_unfinished_fit_is_refused_before_anything_is_deleted(make_staged_rep
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
     _plant_unread_comparand(run)
-    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     (run / "posterior").mkdir()
-    report = {"passed": True, "failures": [], "constraint_set_hash": current}
-    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(fit_report(run)))
     for artifact in written:
         (run / artifact).write_text("from the interrupted fit")
     earlier = (
@@ -367,7 +367,40 @@ def test_a_report_that_cannot_be_read_is_refused_before_anything_is_deleted(
     assert all(path.read_text() == "from an earlier validation" for path in earlier)
 
 
-def test_a_failed_fits_report_alone_is_written_up_as_not_beaten(make_staged_repo) -> None:
+def test_a_fit_reconciled_into_bounds_since_rewritten_is_refused_before_anything_is_deleted(
+    make_staged_repo, plant_finished_fit, rewrite_bounds
+) -> None:
+    """`D-136`. `solve-bounds` re-run under the same constraint set, after a change to
+    `constraints/bounds.py`, rewrites `deterministic_bounds.parquet` and leaves the fit's
+    `constraint_set_hash` check passing. The report now records the digest of the bounds the draws
+    were reconciled into, and the command refuses a fit whose recorded digest is not the file's
+    before the last record is deleted. The comparand is planted as text, since a refusal never
+    reads it."""
+    repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
+    run = repo.run_dir
+    _plant_unread_comparand(run)
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    plant_finished_fit(run, current)
+    rewrite_bounds(run)
+    earlier = (
+        run / "promotion_record.json",
+        run / "state_model_validation" / "validation_manifest.json",
+    )
+    for path in earlier:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("from an earlier validation")
+    result = _invoke("validate-state-model", repo.config_path)
+    assert result.exit_code != 0
+    assert isinstance(result.exception, SystemExit), result.exception
+    # Short tokens only, as `test_baseline_cli.py` explains: Typer boxes and hard-wraps the message.
+    assert "fit-state-model" in result.output
+    assert "solve-bounds" in result.output
+    assert all(path.read_text() == "from an earlier validation" for path in earlier)
+
+
+def test_a_failed_fits_report_alone_is_written_up_as_not_beaten(
+    make_staged_repo, fit_report
+) -> None:
     """A failed gate writes its report and nothing else, by design, so the report alone is not an
     unfinished fit: the command records the model as not beaten without a store (Decision 9). The
     last validation's tables are replaced by none, never left beside a not-beaten record. The record
@@ -377,8 +410,7 @@ def test_a_failed_fits_report_alone_is_written_up_as_not_beaten(make_staged_repo
     _plant_comparand(run)
     current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     (run / "posterior").mkdir()
-    report = {"passed": False, "failures": ["parameter_rhat_max"], "constraint_set_hash": current}
-    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(fit_report(run, passed=False)))
     (run / "state_model_validation").mkdir()
     (run / "state_model_validation" / "validation_scores.parquet").write_text("from the last run")
     result = _invoke("validate-state-model", repo.config_path)
@@ -422,7 +454,7 @@ def test_the_command_requires_validates_manifest(make_staged_repo) -> None:
     ("damage", "found"), list(COMPARAND_DAMAGE.items()), ids=list(COMPARAND_DAMAGE)
 )
 def test_a_comparand_validate_did_not_write_is_refused_before_anything_is_deleted(
-    make_staged_repo, damage, found
+    make_staged_repo, fit_report, damage, found
 ) -> None:
     """#44, found beside Codex's P1. The record names the comparand by digest, and the command
     hashed whatever tables it found, parsed them again from their paths later, and raised on one
@@ -433,10 +465,8 @@ def test_a_comparand_validate_did_not_write_is_refused_before_anything_is_delete
     repo = make_staged_repo({"model": SMALL_SAMPLER, "validation": FIXTURE_VALIDATION})
     run = repo.run_dir
     _plant_comparand(run, damage=damage)
-    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     (run / "posterior").mkdir()
-    report = {"passed": False, "failures": ["parameter_rhat_max"], "constraint_set_hash": current}
-    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(fit_report(run, passed=False)))
     earlier = (
         run / "promotion_record.json",
         run / "state_model_validation" / "validation_scores.parquet",

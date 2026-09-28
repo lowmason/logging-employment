@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import typer
 
 from .config import load_config
+from .runs import partial_path as _partial
 
 if TYPE_CHECKING:  # annotations only; keeps CLI start-up cheap
     from collections.abc import Iterator, Mapping
@@ -103,15 +104,6 @@ def _constraints_dir(cfg: Config) -> Path:
     return Path(cfg.storage.constraints_uri)
 
 
-def _partial(path: Path) -> Path:
-    """The sibling a file or directory is written to before it is renamed over `path`.
-
-    One name for every such sibling, so the manifest writer, the staged promotion record and the
-    staged validation tables agree on what an unfinished write looks like. No reader opens one.
-    """
-    return path.with_name(f"{path.name}.partial")
-
-
 def _stage_manifest(path: Path, payload: Mapping[str, object]) -> Path:
     """Write the bytes `_write_manifest` puts at `path` to its `.partial` sibling, and return it.
 
@@ -198,7 +190,7 @@ def build_constraints_command(
         HarmonizedData,
         schema_fingerprint,
     )
-    from .runs import run_dir, run_id
+    from .runs import replace_whole, run_dir, run_id
 
     cfg = load_config(config)
     data = HarmonizedData.load(Path(cfg.storage.staged_uri))
@@ -215,7 +207,10 @@ def build_constraints_command(
 
     run = run_dir(cfg, run_id(cfg, _input_digests(cfg)))
     run.mkdir(parents=True, exist_ok=True)
-    (run / "config.resolved.yaml").write_text(yaml.safe_dump(resolved_dict(cfg), sort_keys=True))
+    # Replaced whole (`D-134`): `write_text` truncates first, so a kill or a full disk mid-write
+    # left the resolved config cut short in a directory whose manifests are never partial.
+    with replace_whole(run / "config.resolved.yaml") as partial:
+        partial.write_text(yaml.safe_dump(resolved_dict(cfg), sort_keys=True))
     _write_manifest(
         run / "schema_manifest.json",
         {
@@ -310,13 +305,71 @@ def solve_bounds_command(
     typer.echo(f"flagged {narrow} narrow, {exact} exact")
 
 
+class _SolvedBounds(NamedTuple):
+    """This run's `deterministic_bounds.parquet` as `_solved_bounds` read it, once."""
+
+    constraint_set_hash: str
+    sha256: str
+    bounds: pl.DataFrame
+
+
+def _solved_bounds(run: Path, *, held_to: str) -> _SolvedBounds:
+    """This run's bounds, read once, refused unless they were solved for this run's constraint set.
+
+    The precondition `run-baselines` and `fit-state-model` share. Both hold what they produce to
+    §9's per-cell interval, and `held_to` says which (INV-002's estimates, INV-012's draws), so a
+    run without `schema_manifest.json` or `deterministic_bounds.parquet` has nothing to hold it to
+    and the missing file is named with the command that writes it. R-S5P-3 made `solve-bounds` a
+    hard precondition of `run-baselines` rather than a check that skipped itself when its input
+    was absent: a silently skipped invariant is the failure that requirement exists to remove.
+
+    THE BOUNDS MUST BE THIS CONSTRAINT SET'S. `run_id` does not cover code, so `build-constraints`
+    can re-run under the same id after a code change and leave the old bounds beside a new
+    `schema_manifest.json`. `constraint_set_hash` is the one cross-stage check that fires
+    (CLAUDE.md). `fit-state-model` ran it before it deleted anything, so a refusal keeps the last
+    fit; `run-baselines` ran no check, held every estimate to the old bounds and stamped
+    `baseline_results` with the manifest's new hash (`D-130`, plan 16's Decision 9). Both refuse
+    here now, before either writes.
+
+    ONE READ. The bytes hashed are the bytes parsed, so the digest `fit-state-model` records in
+    its report and its manifest (`D-136`) is of the file its draws were reconciled into, not of
+    whatever `solve-bounds` wrote between two reads. `_stale_fit` compares it with the file on disk.
+    """
+    import hashlib
+    import io
+    import json
+
+    import polars as pl
+
+    manifest_path = run / "schema_manifest.json"
+    bounds_path = run / "deterministic_bounds.parquet"
+    if not manifest_path.exists():
+        raise typer.BadParameter(
+            f"{manifest_path} is missing: no `build-constraints` run matches the harmonized "
+            "inputs currently in the staged directory. Run `build-constraints` first"
+        )
+    if not bounds_path.exists():
+        raise typer.BadParameter(
+            f"{bounds_path} is missing: {held_to}, and this run has none. Run `solve-bounds` first"
+        )
+    constraint_set_hash = json.loads(manifest_path.read_text())["constraint_set_hash"]
+    raw = bounds_path.read_bytes()
+    bounds = pl.read_parquet(io.BytesIO(raw))
+    solved_against = sorted(set(bounds["constraint_set_hash"].to_list()))
+    if solved_against != [constraint_set_hash]:
+        raise typer.BadParameter(
+            f"{bounds_path} was solved against constraint set {solved_against}, but "
+            f"{manifest_path} names {constraint_set_hash!r}: `build-constraints` ran after "
+            "`solve-bounds`. Run `solve-bounds` first"
+        )
+    return _SolvedBounds(constraint_set_hash, hashlib.sha256(raw).hexdigest(), bounds)
+
+
 @app.command("run-baselines")
 def run_baselines_command(
     config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
 ) -> None:
     """Run every §10 transparent baseline and persist the results under this run's directory."""
-    import json
-
     import polars as pl
 
     from .baselines.runner import (
@@ -338,28 +391,19 @@ def run_baselines_command(
     cfg = load_config(config)
     data = HarmonizedData.load(Path(cfg.storage.staged_uri))
     run = run_dir(cfg, run_id(cfg, _input_digests(cfg)))
-    manifest_path = run / "schema_manifest.json"
-    if not manifest_path.exists():
-        raise typer.BadParameter(
-            f"{manifest_path} is missing: no `build-constraints` run matches the harmonized "
-            "inputs currently in the staged directory. Run `build-constraints` first"
-        )
-    # A SECOND PRECONDITION, new with R-S5P-3. INV-002's per-cell half checks every estimate
-    # against §9's solved interval, so `solve-bounds` joins `build-constraints` as a gate rather
-    # than the check being skipped when its input happens to be absent. A silently-skipped
-    # invariant is the failure this requirement exists to remove, and the documented pipeline
-    # order already runs `solve-bounds` before `run-baselines`.
-    bounds_path = run / "deterministic_bounds.parquet"
-    if not bounds_path.exists():
-        raise typer.BadParameter(
-            f"{bounds_path} is missing: every baseline estimate is checked against its per-cell "
-            "deterministic bounds (INV-002), and this run has none. Run `solve-bounds` first"
-        )
+    # TWO PRECONDITIONS (R-S5P-3), and the bounds must be this constraint set's (`D-130`), all
+    # checked before anything is written: `_solved_bounds` names what is missing or stale.
+    solved = _solved_bounds(
+        run,
+        held_to=(
+            "every baseline estimate is checked against its per-cell deterministic bounds (INV-002)"
+        ),
+    )
     results, audit = run_baselines(
         data,
         cfg,
-        constraint_set_hash=json.loads(manifest_path.read_text())["constraint_set_hash"],
-        bounds=state_total_bounds(pl.read_parquet(bounds_path)),
+        constraint_set_hash=solved.constraint_set_hash,
+        bounds=state_total_bounds(solved.bounds),
     )
 
     out = run / "baseline_results"
@@ -446,13 +490,12 @@ def fit_state_model_command(
     A pass writes the store, the summary and, last, the manifest, so a passing report does not by
     itself prove the fit finished: both commands that read a fit check all three are there, the
     manifest parses, and its digests match the other two (`_unfinished_fit`). The report names the
-    constraint set the draws were reconciled against, and both compare it with the run's own first
-    (`_stale_fit`).
+    constraint set the draws were reconciled against and, since `D-136`, the digest of the bounds
+    file they were reconciled into; both commands compare the two with the run's own first
+    (`_stale_fit`), so a `solve-bounds` re-run under the same constraint set, which keeps the hash,
+    still makes the fit stale.
     """
-    import json
     import shutil
-
-    import polars as pl
 
     from .baselines.runner import state_total_bounds
     from .build import write_parquet_deterministic
@@ -471,28 +514,12 @@ def fit_state_model_command(
     data = HarmonizedData.load(Path(cfg.storage.staged_uri))
     rid = run_id(cfg, _input_digests(cfg))
     run = run_dir(cfg, rid)
-    manifest_path = run / "schema_manifest.json"
-    bounds_path = run / "deterministic_bounds.parquet"
-    for path, command in ((manifest_path, "build-constraints"), (bounds_path, "solve-bounds")):
-        if not path.exists():
-            raise typer.BadParameter(
-                f"{path} is missing: every draw is reconciled into this run's deterministic "
-                f"bounds (INV-012), and no run matches the staged inputs. Run `{command}` first"
-            )
-    # THE BOUNDS MUST BE THIS CONSTRAINT SET'S. `run_id` does not cover code, so `build-constraints`
-    # can re-run under the same id after a code change and leave the old `deterministic_bounds`
-    # beside a new `schema_manifest.json`. `constraint_set_hash` is the one cross-stage check that
-    # fires (CLAUDE.md), and it runs before anything is deleted, so a refusal keeps the last fit.
-    # That fit is then stale, and `_stale_fit` keeps `reconcile` and `validate-state-model` off it.
-    constraint_set_hash = json.loads(manifest_path.read_text())["constraint_set_hash"]
-    bounds = pl.read_parquet(bounds_path)
-    solved_against = sorted(set(bounds["constraint_set_hash"].to_list()))
-    if solved_against != [constraint_set_hash]:
-        raise typer.BadParameter(
-            f"{bounds_path} was solved against constraint set {solved_against}, but "
-            f"{manifest_path} names {constraint_set_hash!r}: `build-constraints` ran after "
-            "`solve-bounds`. Run `solve-bounds` first"
-        )
+    # Both preconditions, and the bounds must be this constraint set's, checked before anything is
+    # deleted so that a refusal keeps the last fit (`_solved_bounds`). That fit is then stale, and
+    # `_stale_fit` keeps `reconcile` and `validate-state-model` off it.
+    solved = _solved_bounds(
+        run, held_to="every draw is reconciled into this run's deterministic bounds (INV-012)"
+    )
     posterior = run / "posterior"
     shutil.rmtree(posterior, ignore_errors=True)
     for stale in (run / "posterior_summary.parquet", run / "state_model_manifest.json"):
@@ -502,12 +529,17 @@ def fit_state_model_command(
     monthly = data.qcew_monthly
     model_data = build_model_data(monthly)
     fit = fit_state_total_model(model_data, StateModelConfig.from_config(cfg.model))
-    draws = reconcile_fit(fit, monthly, state_total_bounds(bounds), cfg)
+    draws = reconcile_fit(fit, monthly, state_total_bounds(solved.bounds), cfg)
     check = check_reconciled(draws, tolerance=cfg.reconciliation.tolerance)
     report = evaluate_gate(fit, draws, check, cfg.model.diagnostics, scope="production")
     _write_manifest(
         posterior / "diagnostics.json",
-        {**report.to_json(), "run_id": rid, "constraint_set_hash": constraint_set_hash},
+        {
+            **report.to_json(),
+            "run_id": rid,
+            "constraint_set_hash": solved.constraint_set_hash,
+            "deterministic_bounds_sha256": solved.sha256,
+        },
     )
     try:
         assert_gate_passes(report)
@@ -519,16 +551,23 @@ def fit_state_model_command(
         "run_id": rid,
         "model_id": MODEL_ID,
         "model_version": MODEL_VERSION,
-        "constraint_set_hash": constraint_set_hash,
+        "constraint_set_hash": solved.constraint_set_hash,
     }
     digest = write_store(run / STORE_PATH, draws, fit, model_data, attrs=attrs)
     summary = posterior_summary(
-        draws, monthly, bounds, run_id=rid, constraint_set_hash=constraint_set_hash
+        draws,
+        monthly,
+        solved.bounds,
+        run_id=rid,
+        constraint_set_hash=solved.constraint_set_hash,
     )
     _write_manifest(
         run / "state_model_manifest.json",
         {
             **attrs,
+            # The file the draws were reconciled into, by digest (`D-136`); the report carries
+            # the same, and `_stale_fit` reads it there.
+            "deterministic_bounds_sha256": solved.sha256,
             "sampler": fit.sampler,
             "draws_sha256": digest,
             "store": STORE_PATH,
@@ -557,7 +596,7 @@ def fit_state_model_command(
 
 
 def _stale_fit(run: Path) -> dict[str, str | None] | None:
-    """The fit's and the run's constraint-set hashes when they differ, or `None` when they agree.
+    """What the fit and the run disagree on, constraint set or bounds file, or `None` when nothing.
 
     A fit can outlive its constraint set. `fit-state-model` refuses stale bounds before it deletes
     anything, so that refusal keeps the last fit, and `build-constraints` can re-run under the same
@@ -566,30 +605,54 @@ def _stale_fit(run: Path) -> dict[str, str | None] | None:
     pass. So `reconcile` and `validate-state-model`, the two commands that read a fit, call this
     first. Deleting the fit on refusal would close only the first of those two routes.
 
-    The fit's hash is `posterior/diagnostics.json`'s. Every fit writes that report first, gate
-    passed or not, into the `posterior/` it emptied, so the report and the store come from one fit,
-    and reading it needs no netCDF reader. A report that is absent, cannot be read, does not parse
-    to an object or lacks the key is `None`, which matches nothing: an unrecorded fit is refused,
-    never trusted, and never raised past the caller (Codex on #43), so `reconcile` still writes its
-    verdict. This runs first in `validate-state-model`, and in `reconcile` whenever a store exists,
-    so a report that cannot be read is refused here as stale. `_unfinished_fit` names the same
-    report `unreadable` only in a `reconcile` without a store.
+    A FIT CAN ALSO OUTLIVE ITS BOUNDS FILE UNDER ONE CONSTRAINT SET (`D-136`). `solve-bounds` can
+    re-run under the same id after a change to `constraints/bounds.py` and rewrite
+    `deterministic_bounds.parquet` without changing the set, so the hash check passed and both
+    commands re-checked the draws against the bounds stored with them (`models/arviz_io.py`), which
+    they hold to by construction. The report records the digest of the bounds file the draws were
+    reconciled into (`_solved_bounds`), and it is compared with the file on disk once the sets
+    agree. The set is checked first because it is the more specific diagnosis: a new set means a
+    new file too, and the remedy then starts a command earlier.
+
+    Both of the fit's records are `posterior/diagnostics.json`'s. Every fit writes that report
+    first, gate passed or not, into the `posterior/` it emptied, so the report and the store come
+    from one fit, and reading it needs no netCDF reader. A report that is absent, cannot be read,
+    does not parse to an object or lacks a key is `None` for that key, which matches nothing: an
+    unrecorded fit is refused, never trusted, and never raised past the caller (Codex on #43), so
+    `reconcile` still writes its verdict. A bounds file that is absent or cannot be read is `None`
+    the same way. This runs first in `validate-state-model`, and in `reconcile` whenever a store
+    exists, so a report that cannot be read is refused here as stale. `_unfinished_fit` names the
+    same report `unreadable` only in a `reconcile` without a store.
     """
+    import hashlib
     import json
 
-    def recorded(path: Path) -> str | None:
-        """The `constraint_set_hash` a JSON artifact records, or `None` when it records none."""
+    def document(path: Path) -> dict[str, object] | None:
+        """A JSON artifact parsed to an object, or `None` when it is not one or cannot be read."""
         try:
-            document = json.loads(path.read_text())
+            loaded = json.loads(path.read_text())
         except OSError, ValueError:
             return None
-        return document.get("constraint_set_hash") if isinstance(document, dict) else None
+        return loaded if isinstance(loaded, dict) else None
 
-    fit = recorded(run / "posterior" / "diagnostics.json")
-    current = recorded(run / "schema_manifest.json")
-    if fit is not None and fit == current:
+    def recorded(artifact: dict[str, object] | None, key: str) -> str | None:
+        """The string `artifact` records under `key`, or `None` when it records none."""
+        value = artifact.get(key) if artifact else None
+        return value if isinstance(value, str) else None
+
+    report = document(run / "posterior" / "diagnostics.json")
+    fit = recorded(report, "constraint_set_hash")
+    current = recorded(document(run / "schema_manifest.json"), "constraint_set_hash")
+    if fit is None or fit != current:
+        return {"fit_constraint_set_hash": fit, "constraint_set_hash": current}
+    fit_bounds = recorded(report, "deterministic_bounds_sha256")
+    try:
+        bounds = hashlib.sha256((run / "deterministic_bounds.parquet").read_bytes()).hexdigest()
+    except OSError:
+        bounds = None
+    if fit_bounds is not None and fit_bounds == bounds:
         return None
-    return {"fit_constraint_set_hash": fit, "constraint_set_hash": current}
+    return {"fit_deterministic_bounds_sha256": fit_bounds, "deterministic_bounds_sha256": bounds}
 
 
 def _stale_reason(stale: Mapping[str, str | None]) -> str:
@@ -599,8 +662,28 @@ def _stale_reason(stale: Mapping[str, str | None]) -> str:
     report or this run's `schema_manifest.json` is absent, cannot be read, or names no set. Both
     commands said "reconciled against constraint set None" of it, which no fit ever was (#43's
     follow-up). So it is "unrecorded", one word that Typer's box cannot wrap in two, and the remedy
-    starts at the command that writes the missing record.
+    starts at the command that writes the missing record. The bounds finding (`D-136`) reads the
+    same way, and only a re-fit clears two digests that differ: the bounds on disk are this run's.
     """
+    if "deterministic_bounds_sha256" in stale:
+        fit_bounds = stale["fit_deterministic_bounds_sha256"]
+        bounds = stale["deterministic_bounds_sha256"]
+        if bounds is None:
+            return (
+                "this run's bounds are unrecorded (its deterministic_bounds.parquet is absent or "
+                "cannot be read). Run `solve-bounds` and `fit-state-model` first"
+            )
+        if fit_bounds is None:
+            return (
+                "the fit's bounds are unrecorded (its report, posterior/diagnostics.json, names no "
+                "deterministic_bounds_sha256, so it predates `D-136` or was not written by "
+                "`fit-state-model`). Run `fit-state-model` first"
+            )
+        return (
+            f"the fit was reconciled into bounds with sha256 {fit_bounds!r}, and this run's "
+            f"deterministic_bounds.parquet has {bounds!r}: `solve-bounds` re-ran under the same "
+            "constraint set. Run `fit-state-model` first"
+        )
     fit, current = stale["fit_constraint_set_hash"], stale["constraint_set_hash"]
     if current is None:
         return (
@@ -701,6 +784,82 @@ def _unfinished_reasons(unfinished: dict[str, list[str]]) -> str:
     )
 
 
+def _read_baseline_results(run: Path) -> tuple[pl.DataFrame, str]:
+    """`baseline_results.parquet`, read once, and refused unless `run-baselines` wrote it for this run.
+
+    `reconcile` checked that the file existed, parsed it from its path and took
+    `baseline_results_sha256` from a second read, so it verified whatever it found and recorded the
+    digest of whatever was there by then (`D-135`): results a `run-baselines` that failed between
+    its results and its manifest left (`D-133`), results rewritten since, or results produced before
+    `build-constraints` re-ran under the same id, which `run_id` does not see because it does not
+    cover code. `run-baselines` records the digest of the results it writes in
+    `baseline_manifest.json`'s `output_hashes` and stamps every row with the constraint set it ran
+    under, and both are checked here, the way `_read_comparand` checks `validate`'s tables and
+    `_solved_bounds` the bounds (#44 closed the same gap for `validate-state-model`).
+
+    ONE READ: the bytes hashed are the bytes parsed, so the recorded digest is of the rows that were
+    verified. A refusal is a precondition, as a missing file is, and writes no verdict: what is on
+    disk is not this run's baseline results, so there is nothing for §16.1's manifest to describe.
+    A manifest that cannot be read or names no digest is a refusal too, never an exception: no
+    `run-baselines` this run can see wrote the file.
+    """
+    import hashlib
+    import io
+    import json
+
+    import polars as pl
+
+    path = run / "baseline_results" / "baseline_results.parquet"
+    if not path.exists():
+        raise typer.BadParameter(
+            f"{path} is missing: no `run-baselines` run matches the harmonized inputs currently "
+            "in the staged directory. Run `run-baselines` first"
+        )
+    raw = path.read_bytes()
+    sha256 = hashlib.sha256(raw).hexdigest()
+    manifest = run / "baseline_manifest.json"
+    try:
+        recorded = json.loads(manifest.read_text())["output_hashes"]["baseline_results"]
+    except OSError, ValueError, KeyError, TypeError:
+        recorded = None
+    if recorded is None:
+        raise typer.BadParameter(
+            f"{manifest.name} is missing, cannot be read or records no digest for {path.name}, so "
+            "no `run-baselines` this run can see wrote it. Run `run-baselines` first"
+        )
+    if recorded != sha256:
+        raise typer.BadParameter(
+            f"{path.name} is not what {manifest.name} records `run-baselines` writing: it was "
+            "rewritten since, or left by a run that failed before its manifest. Run "
+            "`run-baselines` first"
+        )
+    try:
+        results = pl.read_parquet(io.BytesIO(raw))
+    except (pl.exceptions.PolarsError, pl.exceptions.PanicException) as error:
+        raise typer.BadParameter(
+            f"{path.name} cannot be parsed as Parquet, though {manifest.name} vouches for its "
+            "bytes. Run `run-baselines` first"
+        ) from error
+    schema = run / "schema_manifest.json"
+    try:
+        current = json.loads(schema.read_text())["constraint_set_hash"]
+    except OSError, ValueError, KeyError, TypeError:
+        current = None
+    if current is None:
+        raise typer.BadParameter(
+            f"this run's constraint set is unrecorded (its {schema.name} is absent, cannot be read, "
+            "or names none). Run `build-constraints`, `solve-bounds` and `run-baselines` first"
+        )
+    produced_against = sorted(set(results["constraint_set_hash"].to_list()))
+    if produced_against != [current]:
+        raise typer.BadParameter(
+            f"{path.name} was produced against constraint set {produced_against}, and this run's "
+            f"{schema.name} names {current!r}: `build-constraints` ran after `run-baselines`. Run "
+            "`solve-bounds` and `run-baselines` first"
+        )
+    return results, sha256
+
+
 @app.command("reconcile")
 def reconcile_command(
     config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
@@ -710,9 +869,12 @@ def reconcile_command(
     Stage 3 reconciles inside `run-baselines`, so this command verifies rather than produces: it
     re-sums the persisted estimates against each month's recorded residual and reports the largest
     difference. It does NOT re-run the allocation. Stage 5 makes it load-bearing, when posterior
-    draws reconcile separately from the estimators that seeded them.
+    draws reconcile separately from the estimators that seeded them. What it verifies must be this
+    run's: results its manifest does not vouch for, or from another constraint set, are refused
+    before anything is checked (`_read_baseline_results`, `D-135`).
     """
     import hashlib
+    import json
 
     import polars as pl
 
@@ -720,13 +882,7 @@ def reconcile_command(
 
     cfg = load_config(config)
     run = run_dir(cfg, run_id(cfg, _input_digests(cfg)))
-    path = run / "baseline_results" / "baseline_results.parquet"
-    if not path.exists():
-        raise typer.BadParameter(
-            f"{path} is missing: no `run-baselines` run matches the harmonized inputs currently "
-            "in the staged directory. Run `run-baselines` first"
-        )
-    results = pl.read_parquet(path)
+    results, results_sha256 = _read_baseline_results(run)
     ran = results.filter(pl.col("reconciliation_status") == "anchored_and_reconciled")
     drift = (
         ran.group_by(["estimator_id", "reference_month"])
@@ -737,13 +893,14 @@ def reconcile_command(
     within_tolerance = worst <= cfg.reconciliation.tolerance
     # §16.1: "Every command MUST write a machine-readable manifest and MUST be idempotent for the
     # same inputs." A verifier that only echoes leaves nothing for §18.1 to reproduce against, so
-    # the verdict and the digest of what was checked are persisted beside the results.
+    # the verdict and the digest of what was checked are persisted beside the results. The digest
+    # is of the bytes that were parsed, from the one read (`D-135`).
     payload: dict[str, object] = {
         "checked_pairs": drift.height,
         "max_residual_drift": worst,
         "tolerance": cfg.reconciliation.tolerance,
         "within_tolerance": within_tolerance,
-        "baseline_results_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "baseline_results_sha256": results_sha256,
     }
     # Plan 16: INV-012 re-measured on the PERSISTED draws once `fit-state-model` has written them.
     # `fit-state-model` checked the draws it held in memory; this reads the file back, so a defect
@@ -776,8 +933,16 @@ def reconcile_command(
 
         draws = read_store(store)
         check = check_reconciled(draws, tolerance=cfg.reconciliation.tolerance)
-        digest_matches = draws_digest(draws) == store_digest(store)
+        digest = draws_digest(draws)
+        digest_matches = digest == store_digest(store)
         state_model_passed = check.passed and digest_matches
+        # WHICH FIT the verdict describes (`D-137`). A re-fit deletes the store, the summary and
+        # its manifest, not this manifest, and `draws_sha256_matches` alone could not tell the
+        # last verdict's fit from the new draws beside it. The same three fields as the promotion
+        # record's `fit`, from one read of the report; `_stale_fit` read it before, on its own, so
+        # a report replaced between the two reads goes unnoticed, as `_validate_state_model` says
+        # of its own.
+        report = (run / "posterior" / "diagnostics.json").read_bytes()
         payload["state_model"] = {
             "draws_checked": check.draws_checked,
             "months_checked": check.months_checked,
@@ -785,6 +950,11 @@ def reconcile_command(
             "max_anchor_drift": check.max_anchor_drift,
             "bound_violations": check.bound_violations,
             "draws_sha256_matches": digest_matches,
+            "fit": {
+                "diagnostics_sha256": hashlib.sha256(report).hexdigest(),
+                "constraint_set_hash": json.loads(report)["constraint_set_hash"],
+                "draws_sha256": digest,
+            },
             "passed": state_model_passed,
         }
         typer.echo(

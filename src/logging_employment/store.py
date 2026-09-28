@@ -8,7 +8,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .errors import StoredObjectMismatchError
 from .ingest.base import FetchedBytes
+from .runs import replace_whole
 
 
 @dataclass(frozen=True)
@@ -46,13 +48,33 @@ class RawStore:
         return self.root / source_id / content_sha256 / filename
 
     def put(self, source_id: str, fetched: FetchedBytes, filename: str) -> StoredObject:
-        """Store bytes verbatim and return their identity. Existing objects are left untouched."""
+        """Store bytes verbatim and return their identity. Existing objects are left untouched.
+
+        WRITTEN WHOLE OR NOT AT ALL (`D-134`). `write_bytes` truncates before it writes, so a kill
+        or a full disk mid-write left an object cut short at the path that claims its digest, and
+        every later `put` of the same response saw it exist, left it alone and reported it
+        `was_already_present`. The bytes go to a `.partial` sibling and are renamed over the path
+        (`runs.replace_whole`), so the path holds the whole object or nothing, and a `.partial` a
+        kill leaves matches no reader's glob. An object already there is hashed before it is
+        trusted: one cut short by the code before this, or by anything since, is refused by name
+        (`StoredObjectMismatchError`) rather than reported present, and left for a human, because
+        a stored object is never rewritten.
+        """
         digest = hashlib.sha256(fetched.content).hexdigest()
         path = self.path_for(source_id, digest, filename)
         already = path.exists()
-        if not already:
+        if already:
+            found = hashlib.sha256(path.read_bytes()).hexdigest()
+            if found != digest:
+                raise StoredObjectMismatchError(
+                    f"{path} holds bytes whose sha256 is {found}, not the {digest} its path "
+                    "claims: the object was cut short or altered after it was stored. Remove it "
+                    "and fetch again"
+                )
+        else:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(fetched.content)
+            with replace_whole(path) as partial:
+                partial.write_bytes(fetched.content)
         return StoredObject(
             retrieval_id=digest,
             content_sha256=digest,

@@ -109,7 +109,13 @@ shape and its cell ids, never the file: HDF5 metadata is not promised to hold st
 re-reads the store and re-checks INV-012 against it, and `validate-state-model` does the same
 before it scores anything. Both first compare `diagnostics.json`'s `constraint_set_hash` with
 `schema_manifest.json`'s and refuse a fit from another constraint set unread
-(`cli.py::_stale_fit`): the draws hold to that set's bounds, so re-checking them would pass. Both
+(`cli.py::_stale_fit`): the draws hold to that set's bounds, so re-checking them would pass. The
+sets agreeing, both then compare the report's `deterministic_bounds_sha256` with the digest of
+`deterministic_bounds.parquet` on disk and refuse a fit reconciled into a file since rewritten, or
+one that records no digest (`D-136`): `solve-bounds` re-run under one constraint set keeps the hash
+and moves the bounds, and the draws re-verify against the bounds stored with them either way.
+`fit-state-model` takes that digest from the one read of the file it reconciles into
+(`cli.py::_solved_bounds`) and records it in the report and in `state_model_manifest.json`. Both
 also refuse, unread, a fit whose report records a pass while the store, the summary or
 `state_model_manifest.json` is missing or cannot be read or parsed, or a digest the manifest
 records does not match (`cli.py::_unfinished_fit`). Neither check raises on an artifact it cannot
@@ -119,7 +125,10 @@ prove the fit finished. The store's check there
 is identity, not content: the manifest's `draws_sha256` against the one the store was written with.
 HDF5 will not open a store cut short, and both commands re-hash the draws themselves afterwards.
 `fit-state-model` keeps the last fit when it refuses stale bounds, and `build-constraints` can
-re-run without a re-fit, so such a fit is a normal state of a run directory, not a corruption.
+re-run without a re-fit, as `solve-bounds` can under one constraint set, so such a fit is a normal
+state of a run directory, not a corruption. `reconcile`'s verdict names the fit it checked, the
+report's digest, its constraint set and the draws' digest, as the promotion record's `fit` does
+(`D-137`), so a re-fit leaves no verdict standing that cannot be told from the new draws.
 
 ## Tests and commands
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 from pathlib import Path
@@ -173,3 +174,31 @@ def test_solve_bounds_refuses_inputs_that_did_not_produce_the_constraint_tables(
     message = str(result.output) + str(result.exception)
     assert "build-constraints" in message or "constraint_set_hash" in message
     assert not list(Path(cfg.storage.output_uri).rglob("deterministic_bounds.parquet"))
+
+
+def test_an_interrupted_write_of_the_resolved_config_leaves_the_last_one_whole(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-134`. `config.resolved.yaml` was written with `write_text`, which truncates before it
+    writes, so a full disk or a kill mid-write left it cut short in the run directory. It goes to a
+    `.partial` sibling and is renamed over the last one, so an interrupted write leaves the last
+    file as it was and no sibling behind. The failure is simulated in the sibling's own write."""
+    _run(workspace, "build-constraints")
+    cfg = load_config(workspace)
+    run = next(Path(cfg.storage.output_uri).iterdir())
+    resolved = run / "config.resolved.yaml"
+    before = resolved.read_bytes()
+    write_text = Path.write_text
+
+    def disk_full(self: Path, data: str, *args: object, **kwargs: object) -> int:
+        if self.name != "config.resolved.yaml.partial":
+            return write_text(self, data, *args, **kwargs)
+        write_text(self, data[: len(data) // 2])
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", disk_full)
+    result = CliRunner().invoke(app, ["build-constraints", "--config", str(workspace)])
+    monkeypatch.undo()
+    assert isinstance(result.exception, OSError), result.exception
+    assert resolved.read_bytes() == before
+    assert not (run / "config.resolved.yaml.partial").exists()

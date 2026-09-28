@@ -44,7 +44,11 @@ Do not "fix" the empty call sites by inventing one. Do not delete them as dead c
 from this package. It re-sums persisted `baseline_results.parquet` estimates against each month's
 recorded residual and reports drift, and since plan 16 it also re-checks a stored state-total fit
 (`models.reconciliation.check_reconciled` over `models.arviz_io.read_store`) — a verifier, not a
-producer, either way. A fit from another `constraint_set_hash` fails unread (`cli.py::_stale_fit`).
+producer, either way. Baseline results that `baseline_manifest.json` does not vouch for, or from
+another constraint set, are refused before anything is checked (`cli.py::_read_baseline_results`,
+`D-135`). A fit from another `constraint_set_hash`, or one reconciled into a
+`deterministic_bounds.parquet` since rewritten, fails unread (`cli.py::_stale_fit`, `D-136`), and
+the verdict names the fit it checked (`D-137`).
 
 ## The anchor is a modeling assumption, not a constraint
 

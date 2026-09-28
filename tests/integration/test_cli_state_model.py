@@ -61,6 +61,10 @@ def _invoke(command: str, config: Path):
     return CliRunner().invoke(app, [command, "--config", str(config)])
 
 
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 @pytest.fixture()
 def fitted(make_staged_repo):
     repo = make_staged_repo({"model": {**SMALL_SAMPLER, **LOOSE_GATE}})
@@ -85,6 +89,19 @@ def test_the_fit_writes_its_store_its_summary_and_its_manifest(fitted) -> None:
     assert manifest["code_commit"]
     report = json.loads((run / "posterior" / "diagnostics.json").read_text())
     assert (report["scope"], report["passed"]) == ("production", True)
+
+
+@pytest.mark.slow
+def test_the_fit_records_the_bounds_it_reconciled_into(fitted) -> None:
+    """`D-136`. A fit was tied to its bounds only by `constraint_set_hash`, which a re-solve under
+    the same constraint set keeps. The report `_stale_fit` reads and the fit's manifest both name
+    the bounds file by digest, so a rewritten file can be told from the one the draws hold to."""
+    run = fitted.run_dir
+    digest = _sha256(run / "deterministic_bounds.parquet")
+    report = json.loads((run / "posterior" / "diagnostics.json").read_text())
+    manifest = json.loads((run / "state_model_manifest.json").read_text())
+    assert report["deterministic_bounds_sha256"] == digest
+    assert manifest["deterministic_bounds_sha256"] == digest
 
 
 @pytest.mark.slow
@@ -118,6 +135,49 @@ def test_reconcile_re_verifies_the_draws_on_disk(fitted) -> None:
     assert state_model["passed"] is True
     assert state_model["draws_sha256_matches"] is True
     assert state_model["bound_violations"] == 0
+
+
+@pytest.mark.slow
+def test_the_verdict_names_the_fit_it_checked_and_stands_after_a_refit(
+    fitted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-137`. `fit-state-model` deletes the store, the summary and its manifest before it samples,
+    but not `reconcile_manifest.json`, and the verdict recorded only that the digests matched. After
+    a re-fit the last verdict stood beside new draws with nothing to tell the two apart. It now
+    names the fit the way the promotion record's `fit` does: the report's digest, its constraint
+    set and the draws' digest. The re-fit runs under another seed, as a code change would run one
+    under the same run id, and the verdict still names the first fit."""
+    from dataclasses import replace
+
+    from logging_employment.models.interfaces import StateModelConfig
+
+    run = fitted.run_dir
+    for command in ("run-baselines", "reconcile"):
+        result = _invoke(command, fitted.config_path)
+        assert result.exit_code == 0, result.output
+    verdict = json.loads((run / "reconcile_manifest.json").read_text())["state_model"]
+    first = json.loads((run / "state_model_manifest.json").read_text())
+    schema = json.loads((run / "schema_manifest.json").read_text())
+    assert verdict["fit"] == {
+        "diagnostics_sha256": _sha256(run / "posterior" / "diagnostics.json"),
+        "constraint_set_hash": schema["constraint_set_hash"],
+        "draws_sha256": first["draws_sha256"],
+    }
+    from_config = StateModelConfig.from_config
+    monkeypatch.setattr(
+        StateModelConfig,
+        "from_config",
+        classmethod(lambda cls, model: replace(from_config(model), seed=model.seed + 1)),
+    )
+    result = _invoke("fit-state-model", fitted.config_path)
+    monkeypatch.undo()
+    assert result.exit_code == 0, result.output
+    second = json.loads((run / "state_model_manifest.json").read_text())
+    assert second["draws_sha256"] != first["draws_sha256"]
+    standing = json.loads((run / "reconcile_manifest.json").read_text())["state_model"]
+    assert standing == verdict
+    assert standing["fit"]["draws_sha256"] != second["draws_sha256"]
+    assert standing["fit"]["diagnostics_sha256"] != _sha256(run / "posterior" / "diagnostics.json")
 
 
 @pytest.mark.slow
@@ -225,7 +285,9 @@ def test_reconcile_fails_a_fit_from_another_constraint_set_without_reading_it(
 
 
 @pytest.mark.parametrize("written", list(INTERRUPTIONS.values()), ids=list(INTERRUPTIONS))
-def test_reconcile_fails_an_unfinished_fit_without_reading_it(staged_repo, written) -> None:
+def test_reconcile_fails_an_unfinished_fit_without_reading_it(
+    staged_repo, fit_report, written
+) -> None:
     """Codex on #41. `fit-state-model` writes its passing report first, so a fit interrupted after
     it leaves `"passed": true` beside artifacts that were never written. `reconcile` keyed on the
     store alone: with no store it read the run as having no fit, and with one it read the store
@@ -234,10 +296,8 @@ def test_reconcile_fails_an_unfinished_fit_without_reading_it(staged_repo, writt
     result = _invoke("run-baselines", staged_repo.config_path)
     assert result.exit_code == 0, result.output
     run = staged_repo.run_dir
-    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     (run / "posterior").mkdir(parents=True, exist_ok=True)
-    report = {"passed": True, "constraint_set_hash": current}
-    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(fit_report(run)))
     for artifact in written:
         (run / artifact).write_text("from the interrupted fit")
     result = _invoke("reconcile", staged_repo.config_path)
@@ -306,6 +366,89 @@ def test_reconcile_records_a_fit_whose_report_cannot_be_read(staged_repo, with_s
         assert "unrecorded" in result.output
 
 
+def test_reconcile_refuses_a_fit_reconciled_into_bounds_since_rewritten(
+    staged_repo, plant_finished_fit, rewrite_bounds
+) -> None:
+    """`D-136`. A fit was tied to its bounds only by `constraint_set_hash`, so `solve-bounds`
+    re-run under the same constraint set, after a change to `constraints/bounds.py`, left it
+    looking current: `_stale_fit` passed, and the draws were re-checked against the bounds stored
+    with them, which they hold to by construction. The report now records the digest of the bounds
+    file the draws were reconciled into, and a fit whose recorded digest is not the file's is
+    refused unread, the finding recorded and the command that clears it named."""
+    result = _invoke("run-baselines", staged_repo.config_path)
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    plant_finished_fit(run, current)
+    recorded = _sha256(run / "deterministic_bounds.parquet")
+    rewrite_bounds(run)
+    result = _invoke("reconcile", staged_repo.config_path)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert "fit-state-model" in result.output
+    assert "solve-bounds" in result.output
+    manifest = json.loads((run / "reconcile_manifest.json").read_text())
+    assert manifest["within_tolerance"] is True
+    assert manifest["state_model"] == {
+        "fit_deterministic_bounds_sha256": recorded,
+        "deterministic_bounds_sha256": _sha256(run / "deterministic_bounds.parquet"),
+        "passed": False,
+    }
+
+
+def test_reconcile_refuses_a_fit_that_records_no_bounds_digest(staged_repo) -> None:
+    """A report from before `D-136` names no bounds digest. Unrecorded matches nothing, as an
+    unrecorded constraint set does: the fit is refused, never trusted, and the message names the
+    record that is missing rather than a digest of `None`."""
+    result = _invoke("run-baselines", staged_repo.config_path)
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
+    store = run / STORE_PATH
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text("from a fit whose report predates D-136")
+    report = {"passed": True, "constraint_set_hash": current}
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    result = _invoke("reconcile", staged_repo.config_path)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert "fit-state-model" in result.output
+    assert "unrecorded" in result.output
+    manifest = json.loads((run / "reconcile_manifest.json").read_text())
+    assert manifest["state_model"] == {
+        "fit_deterministic_bounds_sha256": None,
+        "deterministic_bounds_sha256": _sha256(run / "deterministic_bounds.parquet"),
+        "passed": False,
+    }
+
+
+def test_a_stale_finding_on_the_bounds_names_the_command_that_clears_it() -> None:
+    """Two recorded digests that differ were reconciled apart, and only a re-fit clears that: the
+    bounds on disk are this run's. A missing one is unrecorded, whether the report names none or
+    the run's bounds file is absent or unreadable, and the remedy starts at the command that
+    writes the missing record."""
+    apart = _stale_reason(
+        {"fit_deterministic_bounds_sha256": "a1", "deterministic_bounds_sha256": "b2"}
+    )
+    assert "'a1'" in apart
+    assert "'b2'" in apart
+    assert "solve-bounds" in apart
+    assert "fit-state-model" in apart
+    fit = _stale_reason(
+        {"fit_deterministic_bounds_sha256": None, "deterministic_bounds_sha256": "b2"}
+    )
+    assert "unrecorded" in fit
+    assert "diagnostics.json" in fit
+    assert "reconciled into" not in fit
+    run = _stale_reason(
+        {"fit_deterministic_bounds_sha256": "a1", "deterministic_bounds_sha256": None}
+    )
+    assert "unrecorded" in run
+    assert "deterministic_bounds.parquet" in run
+    assert "solve-bounds" in run
+    assert "reconciled into" not in run
+
+
 def test_a_stale_finding_never_names_a_constraint_set_nothing_recorded() -> None:
     """Two recorded sets that differ were reconciled apart. A missing one is unrecorded, whether
     the report or this run's `schema_manifest.json` is absent, unreadable or silent, and the
@@ -342,16 +485,14 @@ def test_a_passing_fit_whose_artifacts_agree_is_finished(tmp_path, plant_finishe
     assert _unfinished_fit(tmp_path) is None
 
 
-def test_a_failed_fits_report_alone_is_not_an_unfinished_fit(staged_repo) -> None:
+def test_a_failed_fits_report_alone_is_not_an_unfinished_fit(staged_repo, fit_report) -> None:
     """A failed gate writes its report and nothing else, by design (`fit-state-model`'s
     docstring), so `reconcile` has no draws to re-check and writes the keys it always wrote."""
     result = _invoke("run-baselines", staged_repo.config_path)
     assert result.exit_code == 0, result.output
     run = staged_repo.run_dir
-    current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     (run / "posterior").mkdir(parents=True, exist_ok=True)
-    report = {"passed": False, "failures": ["parameter_rhat_max"], "constraint_set_hash": current}
-    (run / "posterior" / "diagnostics.json").write_text(json.dumps(report))
+    (run / "posterior" / "diagnostics.json").write_text(json.dumps(fit_report(run, passed=False)))
     result = _invoke("reconcile", staged_repo.config_path)
     assert result.exit_code == 0, result.output
     manifest = json.loads((run / "reconcile_manifest.json").read_text())

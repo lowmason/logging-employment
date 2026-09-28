@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 from pathlib import Path
 
@@ -68,6 +69,32 @@ def test_manifest_row_order_does_not_depend_on_fetch_order(tmp_path: Path) -> No
     a = write_source_manifest([ROW, second], tmp_path / "a.parquet")
     b = write_source_manifest([second, ROW], tmp_path / "b.parquet")
     assert a == b
+
+
+def test_an_interrupted_manifest_write_leaves_the_last_manifest_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-134`. `write_parquet` truncates before it writes, so a full disk or a kill mid-write
+    left `runs/source_manifest.parquet` cut short, and with it the record of which snapshots a
+    run used: `build.snapshot_paths` resolves CBP's ambiguous snapshots through it. The frame is
+    written to a `.partial` sibling and renamed over the manifest, so a write that fails partway
+    leaves the last manifest as it was and no sibling behind."""
+    path = tmp_path / "source_manifest.parquet"
+    write_source_manifest([ROW], path)
+    before = path.read_bytes()
+    write_parquet = pl.DataFrame.write_parquet
+
+    def disk_full(self: pl.DataFrame, file: Path, *args: object, **kwargs: object) -> None:
+        write_parquet(self, file, *args, **kwargs)
+        Path(file).write_bytes(Path(file).read_bytes()[: Path(file).stat().st_size // 2])
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(pl.DataFrame, "write_parquet", disk_full)
+    with pytest.raises(OSError, match="No space left"):
+        write_source_manifest([ROW, {**ROW, "snapshot_id": "zzz"}], path)
+    monkeypatch.undo()
+    assert path.read_bytes() == before
+    assert [child.name for child in tmp_path.iterdir()] == [path.name]
 
 
 def test_fetch_refuses_an_unknown_source(tmp_path: Path) -> None:
