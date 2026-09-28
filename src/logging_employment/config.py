@@ -5,11 +5,11 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator, model_validator
 
 _MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
@@ -109,9 +109,9 @@ class SourcesConfig(_Strict):
     `nonemployer`, `bea` -- carry `enabled: false` and belong to Stages 4-8; before they were
     declared here, `extra="forbid"` made the spec's own reference configuration unloadable, which
     is `R-S5P-6`'s defect (`specs/completed/stage5-preconditions.md`) and what this fixes. `R-S5P-6` scoped
-    only these seven. Appendix A's `model:` block is still left failing on purpose, and
-    `tests/unit/test_config.py` asserts it is the only thing that fails; the fence's three MISSING
-    keys were a spec gap, which `D-121` closed in Appendix A rather than with defaults here.
+    only these seven. The fence's three MISSING keys were a spec gap, which `D-121` closed in
+    Appendix A rather than with defaults here, and its `model:` block loads since plan 16 gave it
+    `ModelConfig`. So Appendix A's fence now loads whole, and `tests/unit/test_config.py` pins that.
 
     They are declared as fields rather than admitted by `extra="allow"`
     so that a MISSPELLED source name is still a load-time error and so that `enabled: true` on an
@@ -328,38 +328,168 @@ class ValidationConfig(_Strict):
 class PromotionConfig(_Strict):
     """§13.10's gates. Configurable engineering thresholds, not findings.
 
-    ALL THREE KEYS ARE INERT TODAY, and this note is the record R-S5G-3 requires rather than a
-    disclaimer. Each reaches `config.resolved.yaml` and folds into `runs.run_id`, so an unread key
-    is a claim in a run's record that no code backs -- the defect `D-064` names for four other
-    keys. The convention there is to write inertness into the code (`constraints/matrix.py`'s "NO
-    REAL INPUT UNTIL STAGE 6", `errors.py::NoHarvestFactorError`), which is what this is.
+    ALL FOUR KEYS ARE READ BY `validate/promotion.py`, AND BY NOTHING ELSE. `D-109` recorded the
+    three Appendix A keys as inert until §13.10 had a candidate to evaluate. Plan 16's state-total
+    model is that candidate: `validate-state-model` applies the gates and writes
+    `promotion_record.json`, and every key reaches that record's `thresholds` beside the evidence it
+    was applied to. `catastrophic_stratum_coverage_alpha` is plan 16's own. §13.10's "does not fail
+    catastrophically in any major stratum" states no number, and this is the exact binomial
+    lower-tail level below which a regime's or a Census division's 90% coverage counts as
+    catastrophic.
 
-    They are inert for TWO different reasons, and the distinction is the useful half:
+    THE COVERAGE COMPARISON IS EXACT (`D-109`). Hits over `calibration_sample_size` are a
+    `Fraction`, compared against `Fraction(repr(nominal_coverage_tolerance))`. So 17/20 against
+    0.90 +/- 0.05 counts as within, where the float `abs(0.85 - 0.9) <= 0.05` does not: 44 of
+    `runs/f03023ac9f3a`'s 170 interval-bearing groups sat at exactly 0.85.
 
-    - `maximum_major_stratum_wape_degradation` and `nominal_coverage_tolerance` have their INPUT as
-      of R-S5G-1. `validate/metrics.py` now emits a per-census-division WAPE and a per-division
-      90% coverage into `validation_metrics.parquet`, so both gates are evaluable from a shipped
-      artifact. The coverage values `nominal_coverage_tolerance` would gate on carried a
-      residual-sign defect until `D-112` (fixed 2026-09-12, `19fbdec`); one written before that fix
-      must be regenerated before any gate reads it. What is missing is the CANDIDATE to evaluate: §13.10 compares a model against the
-      preferred transparent baseline and Stage 5 produces the model.
-    - `minimum_wape_improvement` is missing both. Its comparison needs a second scoreboard, and
-      `validation_scoreboard.parquet` exists in one copy -- the baseline one.
-
-    NO EVALUATOR IS BUILT HERE, deliberately. A function whose primary argument is Stage 5's
-    not-yet-designed output would fix that signature by guessing it, and three of §13.10's six
-    gates (hard constraints on draws, convergence diagnostics, disclosure review) are Stage-5 and
-    Stage-8 concepts an evaluator written now could not represent at all. Stage 5 wires these;
-    `tests/unit/test_config_validation_block.py` fails the day `src/` code names one of the keys --
+    `tests/unit/test_config_validation_block.py` fails the day another `src/` module names a key --
     as an attribute, a string, a parameter or a keyword argument, `config.py` itself included -- so
-    this docstring cannot quietly outlive that truth. A reader that never spells a key exactly -- a
+    this note cannot quietly outlive that truth. A reader that never spells a key exactly -- a
     generic `model_dump()` loop, or a dotted path string such as `attrgetter("promotion.<key>")` --
     would not trip it; update this note by hand in that case.
     """
 
-    minimum_wape_improvement: float = 0.05
-    maximum_major_stratum_wape_degradation: float = 0.02
-    nominal_coverage_tolerance: float = 0.05
+    # Each threshold is finite at load (plan 16). The promotion record compares against each, and a
+    # NaN or infinite one either stops a gate flagging anything or fails only after the replicate
+    # fits. The alpha is also a probability: at or below 0, `cdf < alpha` can never hold.
+    minimum_wape_improvement: FiniteFloat = 0.05
+    maximum_major_stratum_wape_degradation: FiniteFloat = 0.02
+    nominal_coverage_tolerance: FiniteFloat = 0.05
+    # Originated by plan 16. §13.10 says "does not fail catastrophically" and gives no number.
+    catastrophic_stratum_coverage_alpha: float = Field(default=0.001, gt=0.0, lt=1.0)
+
+
+# A prior's scale or concentration. NumPyro would take a non-positive or non-finite one without
+# complaint and fail later as a backend error or a non-finite density, not as a refusal naming the
+# value (§18.3), so it is refused here, at load.
+PositiveFinite = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
+
+
+class StateModelPriors(_Strict):
+    """§11.12's starting priors for the state-total model, each one a configured value.
+
+    §11.12: "Every prior must be exposed in resolved configuration." These are in `resolved_dict`
+    and so in `runs.run_id`, deliberately: a prior changes every draw the model writes. The values
+    are weakly informative on the log employees-per-establishment scale, where D1's observed cells
+    have mean 1.46 and SD 0.48 (measured 2026-09-26), so `intercept_mean` centres the intercept
+    there. The innovations' Student-t degrees of freedom are fixed at 5, §11.12's "fixed near 5 for
+    the first implementation".
+
+    EVERY PRIOR IS CHECKED AT LOAD, the slopes' scale included, which sits at the block's top level
+    as Appendix A's own `standardized_beta_sd`. Scales and concentrations are positive and finite
+    (`PositiveFinite`), the intercept's mean is finite, and the degrees of freedom exceed 2: eta's
+    first month starts at the variance-matched scale sigma / sqrt(1 - rho^2), which needs the
+    innovations to have a variance.
+
+    PERSISTENCE IS `persistence_max * Beta(8, 2)`: capped at 0.95, mean 0.76, §11.12's "transformed
+    Beta prior centered near 0.8". §11.2 prefers the AR(1) because Logging intensity is "plausibly
+    mean-reverting". Uncapped, the largest state's posterior-mean persistence on D1 was 0.978, and
+    a production fit failed §11.14's R-hat on one of two seeds; capped, both passed (plan 16,
+    Decision 15). 1.0 removes the cap.
+
+    THERE IS NO OBSERVATION SCALE. Training cells are exact (§11.3), so §11.3's `sigma_y` and its
+    degrees of freedom are not parameters of the model.
+    """
+
+    intercept_mean: FiniteFloat = 1.5
+    intercept_sd: PositiveFinite = 1.0
+    state_scale_sd: PositiveFinite = 0.5
+    region_scale_sd: PositiveFinite = 0.5
+    month_scale_sd: PositiveFinite = 0.25
+    year_scale_sd: PositiveFinite = 0.25
+    persistence_concentration1: PositiveFinite = 8.0
+    persistence_concentration0: PositiveFinite = 2.0
+    persistence_max: float = Field(default=0.95, gt=0.0, le=1.0)
+    innovation_scale_sd: PositiveFinite = 0.1
+    innovation_dispersion_sd: PositiveFinite = 0.5
+    innovation_df: float = Field(default=5.0, gt=2.0, allow_inf_nan=False)
+
+
+class StateModelDiagnostics(_Strict):
+    """§11.14's diagnostic gate as thresholds, enforced by `models/diagnostics.py`.
+
+    §11.14 gives R-hat "at or below 1.01" and asks for "adequate effective sample size" without a
+    number. `min_ess_per_chain` fills that gap with the convention of 100 per chain, so the floor is
+    400 at Appendix A's four chains. `min_ppc_coverage_90` is a floor on the share of training cells
+    inside their 90% ONE-STEP-AHEAD predictive interval, predicted from the month before. Training
+    cells are exact (§11.3), so an in-sample replicate of a training cell is y itself and could not
+    fail. It is a floor only: coverage above nominal means the innovation law is wider than the
+    data's month-to-month moves, which widens intervals without understating them, while a fit
+    that misses more than 15% of its training cells' moves understates them. `max_divergences` is 0
+    because §11.14 says "no unresolved divergent transitions".
+
+    THE THRESHOLDS ARE FINITE AT LOAD. An infinite `max_rhat` would pass every fit's R-hat check,
+    and a NaN one would fail every fit, but only after it had sampled. `min_ppc_coverage_90` is a
+    share, so it lies in [0, 1].
+    """
+
+    max_rhat: FiniteFloat = 1.01
+    min_ess_per_chain: int = 100
+    max_divergences: int = 0
+    min_ppc_coverage_90: float = Field(default=0.85, ge=0.0, le=1.0)
+
+
+class ModelConfig(_Strict):
+    """Appendix A's `model:` block (§11), plus the keys a fit needs that Appendix A omits.
+
+    IN `resolved_dict`, NOT `exclude=True`. The seven inactive sources are excluded because they
+    contribute no bytes to any stage. Every key here changes the draws `fit-state-model` writes, so
+    `runs.run_id` must see it. Adding the block re-identifies every run directory ONCE. Plan 16
+    re-runs the §13.10 comparand `runs/4cf47a918dd8` under the new id and checks the re-run byte for
+    byte against it (`specs/findings/stage-5-log.md`; the plan's Decision 1).
+
+    Appendix A's eleven keys are declared verbatim, and each default is Appendix A's value. Three
+    are originated here: `seed`, `priors` (§11.12) and `diagnostics` (§11.14).
+
+    EVERY FLOAT IN THE BLOCK IS FINITE AT LOAD, because YAML reads `.inf` and `.nan` as floats and
+    a plain `float` admits both. `standardized_beta_sd` is both slopes' prior scale, so it is
+    `PositiveFinite`, as the scales in `priors` are.
+
+    THE THREE `include_*` SWITCHES ARE `Literal[False]`, refused at load like an inactive source.
+    Nothing implements them. §11.2's change points "MAY be added only if validation shows material
+    gains". §11.4's harvest factor and §11.11's CES row are Stage 7's. Accepting `true` would
+    record a model component in the run's config that no code fits.
+
+    `backend` admits one value. `models/state_total.py::BACKENDS` is §2.2's CmdStanPy slot: a
+    second backend adds a value here and an entry there together.
+
+    `suppressed_variance_multipliers` is §11.13's sensitivity list. This stage fits the 1.0 model
+    only, and the other values are Stage 7's sensitivity runs, so the validator requires 1.0 to be
+    present and refuses a multiplier below 1.0 or a repeated one. Each multiplier is a
+    `FiniteFloat` because that check cannot see a NaN: `min()` returns a leading one, and
+    `nan < 1.0` is false. The key is otherwise inert here, and that is recorded rather than hidden:
+    `models/state_total.py` never reads it.
+
+    `seed` is `sum(map(ord, "logging-employment/state-total-model"))`, a descriptive seed rather
+    than a bare constant. It is in the run id because a different seed writes different draws.
+    """
+
+    backend: Literal["numpyro"] = "numpyro"
+    chains: int = Field(default=4, ge=2)
+    warmup: int = Field(default=1000, ge=1)
+    draws: int = Field(default=1000, ge=1)
+    target_accept: float = Field(default=0.9, gt=0.0, lt=1.0)
+    state_dynamic: Literal["student_t_ar1"] = "student_t_ar1"
+    include_change_points: Literal[False] = False
+    include_harvest_factor: Literal[False] = False
+    include_ces: Literal[False] = False
+    standardized_beta_sd: PositiveFinite = 0.5
+    suppressed_variance_multipliers: list[FiniteFloat] = [1.0, 1.5, 2.0]
+    seed: int = 3645
+    priors: StateModelPriors = StateModelPriors()
+    diagnostics: StateModelDiagnostics = StateModelDiagnostics()
+
+    @field_validator("suppressed_variance_multipliers")
+    @classmethod
+    def _the_fitted_multiplier_is_present(cls, value: list[float]) -> list[float]:
+        """Refuse a list without 1.0, with a multiplier below 1.0, or with a repeat (§11.13)."""
+        if 1.0 not in value or min(value) < 1.0 or len(set(value)) != len(value):
+            raise ValueError(
+                f"suppressed_variance_multipliers {value}: §11.13 inflates the suppressed-cell "
+                "process variance, so every multiplier must be >= 1.0, the fitted model's 1.0 must "
+                "be present, and no multiplier may repeat"
+            )
+        return value
 
 
 class Config(_Strict):
@@ -372,6 +502,7 @@ class Config(_Strict):
     reconciliation: ReconciliationConfig
     baselines: BaselinesConfig
     disclosure: DisclosureConfig
+    model: ModelConfig = ModelConfig()
     validation: ValidationConfig = ValidationConfig()
     promotion: PromotionConfig = PromotionConfig()
 

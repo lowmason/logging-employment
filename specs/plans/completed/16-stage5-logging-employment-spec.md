@@ -4,6 +4,8 @@
 > **subagent-driven-development** (the default) — or **executing-plans** when your human partner
 > chose inline execution at the handoff. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status: COMPLETE (2026-09-27)** — executed via executing-plans; deferred items in specs/deferred_items.md
+
 > Roadmap: specs/logging-employment-spec-roadmap.md, Stage 5 — on plan completion, tick the stage and re-validate later stages against what shipped.
 
 > **Decision 15 was answered on 2026-09-26, and the model changed before execution.** While this
@@ -264,7 +266,14 @@ Test files are listed in each task. Every test this plan adds runs without `data
 - Consumes: the main checkout's gitignored `data/` (~564 MB) and `runs/`.
 - Produces: a worktree on `40b2688` or a descendant, where `data/` and `runs/` resolve to the main checkout's, and a measured baseline every later gate is a delta from.
 
-- [ ] **Step 1: Confirm the base, and that nothing this plan edits has moved**
+- [x] **Step 1: Confirm the base, and that nothing this plan edits has moved**
+
+> Deviation (per this step's own branch): the stat was not empty. `origin/main` was `956f52c`,
+> where #38 and #39 had changed `config.py`, `constraints/bounds.py`, `errors.py` and three tests,
+> and #40 only this plan's text. The worktree was already at `956f52c`, so the fast-forward was a
+> no-op, and all 22 diff blocks passed `git apply --check` and applied in plan order before Task 1.
+> This step's `git fetch` was the one network call besides Task 1's `uv add`, which Global
+> Constraints name as the only one.
 
 ```bash
 git log --oneline -1
@@ -273,7 +282,11 @@ git fetch -q origin && git diff --stat 40b2688 origin/main -- src tests config.y
 
 Expected: `40b2688 Merge pull request #35 …` or a descendant, and an empty stat. If `origin/main` has moved inside `src/`, `tests/`, `config.yaml`, `pyproject.toml`, `uv.lock` or `.github/`, fast-forward first. Then check that every diff in this plan still applies to its task's predecessor (`git apply --check` per block) before Task 1. **Stop and report any that do not.**
 
-- [ ] **Step 2: Link the shared data and runs, and keep git blind to the links**
+- [x] **Step 2: Link the shared data and runs, and keep git blind to the links**
+
+> Deviation (mechanical): run as plain commands with absolute link targets, the two exclude lines
+> appended by a plain shell append, because the isolated-worktree harness refuses the compound
+> `awk`/`git` pipeline. The outcome is the step's: `git status --short` empty, five staged tables.
 
 `.gitignore` ignores `data/` and `runs/` with a trailing slash, which matches directories only, and a symlink is not a directory to git. So the links go in the common `info/exclude`, which every worktree of this repo reads.
 
@@ -290,7 +303,12 @@ ls data/staged
 
 Expected: `git status --short` prints nothing. `ls` lists the five staged tables: `bridge.parquet`, `cbp_state_size.parquet`, `qcew_monthly.parquet`, `qcew_national_size.parquet`, `qcew_state_parent.parquet`.
 
-- [ ] **Step 3: Measure the baseline with the data present**
+- [x] **Step 3: Measure the baseline with the data present**
+
+> Deviation (per this step's own note): measured at `956f52c`, 1608 passed for the whole suite and
+> 1581 passed, 27 deselected for the non-slow suite, not the written 1570 and 1543. The +38 is
+> main's #38 (+33) and #39 (+5). The canary printed `39d1d0859838 4cf47a918dd8` as written. Every
+> later gate was checked as a delta from 1581, and every delta matched.
 
 ```bash
 uv run pytest -q -p no:cacheprovider
@@ -332,7 +350,7 @@ This plan was written without JAX, NumPyro, ArviZ or h5netcdf in the project's e
   - `arviz_stats.ess(x, method="bulk", ...)` and `arviz_stats.ess(x, method="tail", prob=(0.05, 0.95), ...)`, both with `chain_axis=0, draw_axis=1`;
   - `xr.DataTree.from_dict`, `.to_netcdf(path, engine="h5netcdf")` and `xr.open_datatree(path, engine="h5netcdf")`.
 
-- [ ] **Step 1: Write the two probes**
+- [x] **Step 1: Write the two probes**
 
 `tests/unit/test_numpyro_api_probe.py`:
 
@@ -487,7 +505,7 @@ def test_a_datatree_round_trips_through_h5netcdf_bit_for_bit(tmp_path: Path) -> 
     assert [str(value) for value in read["state_fips"].values] == ["01", "02", "04"]
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_numpyro_api_probe.py tests/unit/test_arviz_api_probe.py -q`
 
@@ -502,7 +520,12 @@ ERROR tests/unit/test_arviz_api_probe.py
 2 errors
 ```
 
-- [ ] **Step 3: Add the five dependencies, keeping the old lock to compare against**
+- [x] **Step 3: Add the five dependencies, keeping the old lock to compare against**
+
+> Deviation (approved at execution): `h5netcdf[h5py]>=1.8.1`, not `h5netcdf>=1.8.1`. h5netcdf
+> 1.8.1 made its HDF5 backends extras, so the bare requirement installed none: Step 4 listed no
+> h5py, and Step 5 gave 1 failed, 5 passed ("No module named 'h5py', backend not available"). After
+> the change, Step 4 listed h5py 3.16.0 and moved no locked version, and Step 5 gave 6 passed.
 
 ```bash
 cp uv.lock /tmp/uv.lock.pre-plan16
@@ -512,7 +535,7 @@ git diff pyproject.toml
 
 Expected: `[project].dependencies` gains exactly the five lines above, beside the ten it had. `uv add` places them in the list's sorted order, and their order is not load-bearing. This step needs network access to PyPI. If `uv add` cannot resolve, stop and report the resolver's message. Do not loosen a floor to make it resolve.
 
-- [ ] **Step 4: Prove no locked version of an existing package moved**
+- [x] **Step 4: Prove no locked version of an existing package moved**
 
 A moved numpy, scipy or polars could move a float golden, and this plan re-pins none.
 
@@ -537,13 +560,13 @@ EOF
 
 Expected: `moved: {}` and `removed: []`, exit 0. `added` lists `jax`, `jaxlib`, `numpyro`, `arviz-base`, `arviz-stats`, `xarray`, `h5netcdf`, `h5py` and their own transitive dependencies. **If anything moved, stop and report the pairs.** That is a decision for your human partner, not a pin to override.
 
-- [ ] **Step 5: Run the probes to see them pass**
+- [x] **Step 5: Run the probes to see them pass**
 
 Run: `uv run pytest tests/unit/test_numpyro_api_probe.py tests/unit/test_arviz_api_probe.py -q`
 
 Expected: `6 passed`. Five of the six were observed passing on the older local environment (`5 passed, 1 deselected`, with the h5netcdf round trip deselected there). The round trip runs for the first time here.
 
-- [ ] **Step 6: Gates**
+- [x] **Step 6: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -552,7 +575,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: all three gates clean. Non-slow suite: Task 0's count **+ 6 passed**, skipped unchanged.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add pyproject.toml uv.lock tests/unit/test_numpyro_api_probe.py tests/unit/test_arviz_api_probe.py
@@ -588,7 +611,7 @@ Both config additions land in this one task because both feed `resolved_dict`. S
   - `Config.model: ModelConfig = ModelConfig()`;
   - `PromotionConfig.catastrophic_stratum_coverage_alpha: float = 0.001`, in (0, 1), and the three Appendix A thresholds as `FiniteFloat`, because this plan's record is their first reader (Decision 4).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_config_model_block.py` (new; 16 tests):
 
@@ -957,7 +980,7 @@ index 8344a2d..e05267b 100644
  def test_no_scoring_regime_gained_or_lost_a_score(fixture_run):
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_config_model_block.py tests/unit/test_config.py tests/unit/test_config_validation_block.py tests/integration/test_stage4_acceptance.py -q`
 
@@ -971,7 +994,7 @@ ERROR tests/unit/test_config.py
 2 errors
 ```
 
-- [ ] **Step 3: Implement the block**
+- [x] **Step 3: Implement the block**
 
 `src/logging_employment/config.py`:
 
@@ -1268,13 +1291,13 @@ index 45791f6..bab0217 100644
 +  catastrophic_stratum_coverage_alpha: 0.001
 ```
 
-- [ ] **Step 4: Run the tests to see them pass**
+- [x] **Step 4: Run the tests to see them pass**
 
 Run: the Step 2 command.
 
 Expected: every test passes. Observed without `data/`: `57 passed, 2 skipped`. With `data/` linked, the moved pin in `test_stage4_acceptance.py` runs too.
 
-- [ ] **Step 5: Read both ids back, the canary and the pin**
+- [x] **Step 5: Read both ids back, the canary and the pin**
 
 ```bash
 uv run python -c "from pathlib import Path; from logging_employment.config import load_config; from logging_employment.runs import run_id; from logging_employment.cli import _input_digests; c = load_config(Path('config.yaml')); print(run_id(c, {}), run_id(c, _input_digests(c)))"
@@ -1283,7 +1306,7 @@ uv run logging-estimates validate-config --config config.yaml
 
 Expected: `14352bb8e56e dd7337e89047`, then `validate-config` exits 0. If the second id is not `dd7337e89047`, `data/staged` is not the five tables Task 0 listed. **Stop**: Task 15's byte comparison assumes exactly this re-id and no other.
 
-- [ ] **Step 6: Gates**
+- [x] **Step 6: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -1292,7 +1315,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 1's count **+ 18 passed** (16 new here, 2 new in `test_config_validation_block.py`; `test_config.py` renames two and adds none).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add config.yaml src/logging_employment/config.py tests/unit/test_config_model_block.py tests/unit/test_config.py tests/unit/test_config_validation_block.py tests/integration/test_stage4_acceptance.py
@@ -1333,7 +1356,7 @@ git commit -m "feat(config): declare Appendix A's model block and re-id every ru
   - `models.data.build_model_data(monthly: pl.DataFrame) -> ModelData`, `models.data.state_cell_ids(frame) -> tuple[str, ...]`, and `TRAINING_STATUS = "observed"` / `PREDICTION_STATUS = "suppressed"`.
   - `baselines.runner.missing_cell_ids(partition: Partition) -> dict[str, str]`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_model_data.py`:
 
@@ -1482,7 +1505,7 @@ def test_row_order_does_not_move_a_single_array(harmonized_toy) -> None:
     assert reversed_rows.predict_cell_ids == data.predict_cell_ids
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_model_data.py -q`
 
@@ -1495,7 +1518,7 @@ ERROR tests/unit/test_model_data.py
 1 error
 ```
 
-- [ ] **Step 3: Make the runner's identifier public**
+- [x] **Step 3: Make the runner's identifier public**
 
 ```diff
 diff --git a/src/logging_employment/baselines/runner.py b/src/logging_employment/baselines/runner.py
@@ -1535,7 +1558,7 @@ index 6a6ba81..16390f3 100644
                  outcome = estimator.weights(context, anchor)
 ```
 
-- [ ] **Step 4: Write the package, its interfaces and the panel builder**
+- [x] **Step 4: Write the package, its interfaces and the panel builder**
 
 `src/logging_employment/models/__init__.py`. The docstring names modules later tasks add. It states the package's import rule, and later tasks keep to it.
 
@@ -1883,13 +1906,13 @@ def build_model_data(monthly: pl.DataFrame) -> ModelData:
     )
 ```
 
-- [ ] **Step 5: Run the tests to see them pass, and the runner's own tests unchanged**
+- [x] **Step 5: Run the tests to see them pass, and the runner's own tests unchanged**
 
 Run: `uv run pytest tests/unit/test_model_data.py tests/unit/test_baselines_bounds.py tests/integration/test_baseline_golden.py -q`
 
 Expected: all pass. `test_model_data.py` observed: `14 passed`. The golden proves the rename moved no row of `baseline_results`.
 
-- [ ] **Step 6: Gates**
+- [x] **Step 6: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -1898,7 +1921,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 2's count **+ 14 passed**.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/logging_employment/models/__init__.py src/logging_employment/models/interfaces.py src/logging_employment/models/data.py src/logging_employment/baselines/runner.py tests/unit/test_model_data.py
@@ -1940,7 +1963,7 @@ The toy tests exercise determinism, shape, the likelihood's scope, the likelihoo
   - `BACKENDS: dict[str, Callable]`, `CHAIN_METHOD = "vectorized"`, `MAX_TREE_DEPTH = 10`.
   - Draws are chain-major: row `c * draws + d` is chain c, draw d. `fit.sampler` records the backend, the chain method, the sizes, the seed, the model and library versions, and since the D1 profile (Decision 15) `mean_leapfrog_steps` and `tree_depth_saturation_share`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_state_total_model.py`:
 
@@ -2192,7 +2215,7 @@ def test_an_unknown_backend_is_refused_before_anything_samples(toy_data: ModelDa
         fit_state_total_model(toy_data, replace(TINY, backend="cmdstanpy"))
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_state_total_model.py -q`
 
@@ -2205,7 +2228,7 @@ ERROR tests/unit/test_state_total_model.py
 1 error
 ```
 
-- [ ] **Step 3: Write the model**
+- [x] **Step 3: Write the model**
 
 `src/logging_employment/models/state_total.py`:
 
@@ -2682,13 +2705,13 @@ def prior_predictive(data: ModelData, config: StateModelConfig, *, num_samples: 
     return np.asarray(draws["y"])
 ```
 
-- [ ] **Step 4: Run the tests to see them pass**
+- [x] **Step 4: Run the tests to see them pass**
 
 Run: `uv run pytest tests/unit/test_state_total_model.py -q`
 
 Expected: `13 passed`, observed on the older local environment as `13 passed`. If `test_the_same_seed_gives_bit_identical_draws` fails, something reached the model unseeded. Find it; do not loosen the test to `allclose`.
 
-- [ ] **Step 5: Gates**
+- [x] **Step 5: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -2697,7 +2720,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 3's count **+ 13 passed**.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/logging_employment/models/state_total.py tests/unit/test_state_total_model.py
@@ -2742,7 +2765,7 @@ git commit -m "feat(models): the Student-t AR(1) state-intensity model and its l
   - `exact_column_means(values) -> np.ndarray`.
   - The fixture `make_state_fit(values, cell_ids, *, chains=2, parameters=None, diverging=None, ppc_coverage_90=0.9) -> StateModelFit`.
 
-- [ ] **Step 1: Write the fixture and the failing tests**
+- [x] **Step 1: Write the fixture and the failing tests**
 
 `tests/unit/conftest.py`:
 
@@ -2985,7 +3008,7 @@ def test_the_check_reads_the_draws_not_a_summary(
     assert not escaped.passed
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_model_reconciliation.py -q`
 
@@ -2998,7 +3021,7 @@ ERROR tests/unit/test_model_reconciliation.py
 1 error
 ```
 
-- [ ] **Step 3: Write the reconciliation module**
+- [x] **Step 3: Write the reconciliation module**
 
 `src/logging_employment/models/reconciliation.py`:
 
@@ -3217,13 +3240,13 @@ def check_reconciled(draws: ReconciledDraws, *, tolerance: float) -> DrawCheck:
     )
 ```
 
-- [ ] **Step 4: Run the tests to see them pass**
+- [x] **Step 4: Run the tests to see them pass**
 
 Run: `uv run pytest tests/unit/test_model_reconciliation.py -q`
 
 Expected: `8 passed` (observed: `8 passed`).
 
-- [ ] **Step 5: Gates**
+- [x] **Step 5: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -3232,7 +3255,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 4's count **+ 8 passed**.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/logging_employment/models/reconciliation.py tests/unit/conftest.py tests/unit/test_model_reconciliation.py
@@ -3266,7 +3289,7 @@ Three columns are null, each for a stated reason:
   - `models.summary.LEVELS`: `(0.5, "ci50")`, `(0.8, "ci80")`, `(0.9, "ci90")`, `(0.95, "ci95")`, as equal-tailed quantiles.
   - `contracts.OBSERVED_OR_IMPUTED = ("observed", "imputed")`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_posterior_summary.py`:
 
@@ -3441,7 +3464,7 @@ def test_an_undeclared_observed_or_imputed_value_is_refused() -> None:
         assert_declared_provenance(pl.DataFrame({"observed_or_imputed": ["guessed"]}))
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_posterior_summary.py -q`
 
@@ -3454,7 +3477,7 @@ ERROR tests/unit/test_posterior_summary.py
 1 error
 ```
 
-- [ ] **Step 3: Declare the schema and the closed set**
+- [x] **Step 3: Declare the schema and the closed set**
 
 `src/logging_employment/contracts.py`:
 
@@ -3531,7 +3554,7 @@ index f1bed3d..b40b9f3 100644
      "concentration_proxy",
 ```
 
-- [ ] **Step 4: Write the summary**
+- [x] **Step 4: Write the summary**
 
 `src/logging_employment/models/summary.py`:
 
@@ -3689,13 +3712,13 @@ def posterior_summary(
     return frame
 ```
 
-- [ ] **Step 5: Run the tests to see them pass**
+- [x] **Step 5: Run the tests to see them pass**
 
 Run: `uv run pytest tests/unit/test_posterior_summary.py tests/unit/test_contracts_validation.py -q`
 
 Expected: all pass (`test_posterior_summary.py` observed: `9 passed`).
 
-- [ ] **Step 6: Gates**
+- [x] **Step 6: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -3704,7 +3727,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 5's count **+ 9 passed**.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/logging_employment/contracts.py src/logging_employment/models/summary.py tests/unit/test_posterior_summary.py
@@ -3738,7 +3761,7 @@ git commit -m "feat(models): §7.11's posterior_summary from reconciled draws, i
   - `STORE_ENGINE = "h5netcdf"`, `PARAMETER_DIMS`, `TAIL_PROBABILITIES = (0.05, 0.95)`.
 - The store has four groups. `posterior` holds the monitored parameters. `posterior_predictive` holds `reconciled_state_total`, `(chain, draw, cell)`, with `state_fips` and `reference_month` coordinates on `cell`. `sample_stats` holds `diverging`. `constant_data` holds `residual` and `anchor_basis` by month, and `deterministic_lower`, `deterministic_upper` and `raw_mean` by cell.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_arviz_store.py`:
 
@@ -3832,7 +3855,7 @@ def test_draws_out_of_chain_major_order_are_refused(stored, harmonized_toy, make
         )
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_arviz_store.py -q`
 
@@ -3845,7 +3868,7 @@ ERROR tests/unit/test_arviz_store.py
 1 error
 ```
 
-- [ ] **Step 3: Write the store and the statistics**
+- [x] **Step 3: Write the store and the statistics**
 
 `src/logging_employment/models/arviz_io.py`:
 
@@ -4074,13 +4097,13 @@ def read_store(path: Path) -> ReconciledDraws:
     )
 ```
 
-- [ ] **Step 4: Run the tests to see them pass**
+- [x] **Step 4: Run the tests to see them pass**
 
 Run: `uv run pytest tests/unit/test_arviz_store.py tests/unit/test_arviz_api_probe.py -q`
 
 Expected: `7 passed`. **These four store tests were never executed while this plan was written**: no local Python 3.14 environment had h5netcdf or h5py. The xarray and arviz-stats calls they rest on ran in the probes of Task 1. If a store test fails, first check whether the round-trip probe passes too. A failure in both points at the netCDF layer, not at this module.
 
-- [ ] **Step 5: Gates**
+- [x] **Step 5: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -4089,7 +4112,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 6's count **+ 4 passed**.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/logging_employment/models/arviz_io.py tests/unit/test_arviz_store.py
@@ -4118,7 +4141,7 @@ git commit -m "feat(models): the ArviZ-shaped draws store and the R-hat/ESS stat
   - `GateCheck(name, value, threshold, passed, gating)`. The ten check names, in order: `divergences`, `parameter_rhat_max`, `parameter_ess_bulk_min`, `parameter_ess_tail_min`, `cell_rhat_max`, `cell_ess_bulk_min`, `cell_ess_tail_min`, `ppc_coverage_90`, `reconciliation_anchor_drift_max`, `reconciliation_bound_violations`. `ppc_coverage_90` reads the one-step-ahead check Task 4 computes (Decision 5).
   - `assert_gate_passes(report) -> None`, which raises `errors.ModelDiagnosticsError` naming every failed gating check.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_model_diagnostics.py`:
 
@@ -4278,7 +4301,7 @@ def test_an_unknown_scope_is_refused(make_state_fit) -> None:
         evaluate_gate(fit, draws, PASSING, THRESHOLDS, scope="exploratory")
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_model_diagnostics.py -q`
 
@@ -4291,7 +4314,7 @@ ERROR tests/unit/test_model_diagnostics.py
 1 error
 ```
 
-- [ ] **Step 3: Add the error**
+- [x] **Step 3: Add the error**
 
 `src/logging_employment/errors.py`:
 
@@ -4317,7 +4340,7 @@ index 309cb5c..26560f5 100644
 +    """
 ```
 
-- [ ] **Step 4: Write the gate**
+- [x] **Step 4: Write the gate**
 
 `src/logging_employment/models/diagnostics.py`:
 
@@ -4536,13 +4559,13 @@ def assert_gate_passes(report: GateReport) -> None:
         raise ModelDiagnosticsError(f"§11.14's {report.scope} gate failed: {detail}")
 ```
 
-- [ ] **Step 5: Run the tests to see them pass**
+- [x] **Step 5: Run the tests to see them pass**
 
 Run: `uv run pytest tests/unit/test_model_diagnostics.py -q`
 
 Expected: `12 passed` (observed: `12 passed`).
 
-- [ ] **Step 6: Gates**
+- [x] **Step 6: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -4551,7 +4574,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 7's count **+ 12 passed**.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/logging_employment/errors.py src/logging_employment/models/diagnostics.py tests/unit/test_model_diagnostics.py
@@ -4590,7 +4613,7 @@ git commit -m "feat(models): §11.14's diagnostic gate in code, production and r
 
 The CLI tests shrink the sampler to 2 chains of 60 draws after 60 warmup. They loosen the gate so it passes whatever a fit that size measures. These tests are about what the commands write, refuse and reproduce. Convergence belongs to Task 10 and to the D1 fit.
 
-- [ ] **Step 1: Give the integration fixture config overrides, and write the failing tests**
+- [x] **Step 1: Give the integration fixture config overrides, and write the failing tests**
 
 `tests/integration/conftest.py`:
 
@@ -4884,7 +4907,7 @@ def test_the_cli_starts_without_a_ppl() -> None:
     assert result.stdout.strip() == "[]"
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/integration/test_cli_state_model.py -q`
 
@@ -4909,7 +4932,7 @@ ERROR tests/integration/test_cli_state_model.py::test_reconcile_re_verifies_the_
 
 Two tests pass here, and that is their job: they are guards on behaviour Step 3 must not change. `test_a_baseline_only_reconcile_writes_the_keys_it_always_wrote` guards `reconcile`'s existing manifest. `test_the_cli_starts_without_a_ppl` guards the Global Constraints' import discipline, which Step 3 is the first to put at risk.
 
-- [ ] **Step 3: Add the command, and `reconcile`'s second check**
+- [x] **Step 3: Add the command, and `reconcile`'s second check**
 
 `src/logging_employment/cli.py`:
 
@@ -5151,19 +5174,19 @@ index 07d380f..484e335 100644
 
 The `models` imports sit inside each command, as the Global Constraints require, and `test_the_cli_starts_without_a_ppl` holds them there.
 
-- [ ] **Step 4: Run the tests to see them pass**
+- [x] **Step 4: Run the tests to see them pass**
 
 Run: `uv run pytest tests/integration/test_cli_state_model.py -q`
 
 Expected: `12 passed`. **Four of the twelve were never executed while this plan was written**: the four that take the `fitted` fixture, whose fit writes a store (Task 7's caveat). The other eight were observed passing (`8 passed, 4 deselected`, the four deselected). If only the four fail, re-run Task 7's store tests first.
 
-- [ ] **Step 5: See the command in `--help`**
+- [x] **Step 5: See the command in `--help`**
 
 Run: `uv run logging-estimates --help`
 
 Expected: `fit-state-model` is listed beside the existing commands.
 
-- [ ] **Step 6: Gates**
+- [x] **Step 6: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -5172,7 +5195,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 8's count **+ 7 passed**. The five `slow` tests ran in Step 4.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/logging_employment/cli.py tests/integration/conftest.py tests/integration/test_cli_state_model.py
@@ -5206,7 +5229,7 @@ Each assertion's docstring gives the arithmetic its bound comes from, so a revie
 - Consumes: Task 3's `ModelData`, `StateModelConfig` and `StateModelFit`; Task 4's `fit_state_total_model`; Task 7's `rank_rhat`; `config.ModelConfig`.
 - Produces: nothing later tasks import.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 `tests/integration/test_state_total_recovery.py`:
 
@@ -5456,7 +5479,7 @@ def test_the_one_step_check_is_near_nominal(recovered) -> None:
     assert 0.85 <= fit.ppc_coverage_90 <= 0.97
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `uv run pytest tests/integration/test_state_total_recovery.py -q`
 
@@ -5464,7 +5487,7 @@ Expected: `10 passed`: one fit of 4 chains of 500 warmup and 500 draws. It was o
 
 If one assertion fails, **do not widen its bound to pass.** Read the docstring's arithmetic, decide whether the bound or the model is wrong, and stop and report to your human partner with the observed value. A recovery test loosened until it passes is a smoke test with extra steps.
 
-- [ ] **Step 3: Gates**
+- [x] **Step 3: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -5473,7 +5496,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: **unchanged from Task 9**, because the whole module is `slow`. The ten ran in Step 2.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/integration/test_state_total_recovery.py
@@ -5519,7 +5542,7 @@ The float goldens are the check: `test_validation_golden.py` and `test_baseline_
   - `baselines.runner.release_integers(allocated, anchor, bounds, *, cell_ids, estimator_id, config) -> dict[str, int | None]`;
   - `models.validation.model_results(draws, bounds, config, *, constraint_set_hash=None) -> pl.DataFrame` (`BASELINE_RESULT_SCHEMA`), `draw_ensembles(draws) -> dict[str, np.ndarray]`, and `StateModelProducer()`. Its notes are `{"gate": GateReport.to_json(), "draws_sha256": ...}`, and Task 12 reads `gate`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_validate_producer_seam.py`:
 
@@ -5879,7 +5902,7 @@ index ac73913..bf0ec86 100644
 +    )
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_validate_producer_seam.py tests/unit/test_validate_metrics_draws.py tests/unit/test_model_validation.py tests/unit/test_contracts_validation.py tests/integration/test_validation_golden.py -q`
 
@@ -5896,7 +5919,7 @@ ERROR tests/unit/test_validate_producer_seam.py
 3 errors
 ```
 
-- [ ] **Step 3: Extract `release_integers`, verbatim**
+- [x] **Step 3: Extract `release_integers`, verbatim**
 
 `src/logging_employment/baselines/runner.py`:
 
@@ -6048,7 +6071,7 @@ Run: `uv run pytest tests/integration/test_baseline_golden.py -q`
 
 Expected: passes, unchanged. That is the proof the extraction moved nothing. If it fails, the extraction is wrong: fix it, never the golden.
 
-- [ ] **Step 4: Declare and enforce the interval source**
+- [x] **Step 4: Declare and enforce the interval source**
 
 `src/logging_employment/contracts.py`:
 
@@ -6125,7 +6148,7 @@ index b40b9f3..0d9848e 100644
  # the ones that were declined. Distinct in grain from VALIDATION_METRIC_SCHEMA below, and
 ```
 
-- [ ] **Step 5: Open the harness to a producer, and score intervals from draws**
+- [x] **Step 5: Open the harness to a producer, and score intervals from draws**
 
 `src/logging_employment/validate/harness.py`:
 
@@ -6469,7 +6492,7 @@ index 648be65..9515940 100644
  an interval and a score can never disagree about the same predictive distribution.
 ```
 
-- [ ] **Step 6: Write the model's producer**
+- [x] **Step 6: Write the model's producer**
 
 `src/logging_employment/models/validation.py`:
 
@@ -6609,7 +6632,7 @@ class StateModelProducer:
         )
 ```
 
-- [ ] **Step 7: Run the tests to see them pass**
+- [x] **Step 7: Run the tests to see them pass**
 
 Run the Step 2 command again.
 
@@ -6619,7 +6642,7 @@ Expected: all pass (`36 passed` observed). Then run the two float goldens by nam
 uv run pytest tests/integration/test_validation_golden.py tests/integration/test_baseline_golden.py -q
 ```
 
-- [ ] **Step 8: Gates**
+- [x] **Step 8: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -6628,7 +6651,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 10's count **+ 14 passed**.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/logging_employment/baselines/runner.py src/logging_employment/contracts.py src/logging_employment/validate/harness.py src/logging_employment/validate/metrics.py src/logging_employment/validate/intervals.py src/logging_employment/models/validation.py tests/unit/test_validate_producer_seam.py tests/unit/test_validate_metrics_draws.py tests/unit/test_model_validation.py tests/unit/test_contracts_validation.py tests/integration/test_validation_golden.py
@@ -6670,7 +6693,7 @@ The record is `provisional: true` whatever the verdict. Stage 7 adds the harvest
   - `thresholds`, where all four keys are echoed.
   Task 13 adds `run_id`, `model_version` and `comparand` around it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/unit/test_validate_promotion.py`:
 
@@ -7037,7 +7060,7 @@ def test_a_failed_production_fit_is_recorded_without_being_scored() -> None:
     assert record["gates"]["coverage"]["status"] == "not_evaluated_production_fit_failed"
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/unit/test_validate_promotion.py -q`
 
@@ -7050,7 +7073,7 @@ ERROR tests/unit/test_validate_promotion.py
 1 error
 ```
 
-- [ ] **Step 3: Write the promotion record**
+- [x] **Step 3: Write the promotion record**
 
 `src/logging_employment/validate/promotion.py`:
 
@@ -7604,7 +7627,7 @@ def production_failed_record(
     return _record(model_id, False, gates, promotion)
 ```
 
-- [ ] **Step 4: Watch `D-109`'s tripwire redden and name the keys**
+- [x] **Step 4: Watch `D-109`'s tripwire redden and name the keys**
 
 This red is the evidence `D-109`'s done-when asks for. Run it BEFORE converting the test, and keep its output for the Task 15 log entry.
 
@@ -7625,7 +7648,7 @@ FAILED tests/unit/test_config_validation_block.py::test_the_promotion_keys_are_s
 1 failed, 6 passed
 ```
 
-- [ ] **Step 5: Convert the tripwire, and rewrite the docstring it guards**
+- [x] **Step 5: Convert the tripwire, and rewrite the docstring it guards**
 
 The test is converted, not deleted. It now pins `validate/promotion.py` as the ONLY reader, so a second module that could apply a gate differently reddens it again.
 
@@ -7734,13 +7757,13 @@ index 92d59f0..78105f8 100644
      """
 ```
 
-- [ ] **Step 6: Run the tests to see them pass**
+- [x] **Step 6: Run the tests to see them pass**
 
 Run: `uv run pytest tests/unit/test_validate_promotion.py tests/unit/test_config_validation_block.py -q`
 
 Expected: all pass (`test_validate_promotion.py` observed: `17 passed`).
 
-- [ ] **Step 7: Gates**
+- [x] **Step 7: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -7749,7 +7772,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 11's count **+ 17 passed**. The converted tripwire keeps its count.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/logging_employment/validate/promotion.py src/logging_employment/config.py tests/unit/test_validate_promotion.py tests/unit/test_config_validation_block.py
@@ -7782,7 +7805,7 @@ git commit -m "feat(validate): §13.10's promotion record; the promotion keys ar
 
 The fixture validation runs one seed, so one replicate fit per regime; `replicates_per_regime: 3` sizes each mask, as the Stage 4 golden's config does. It uses Task 9's small sampler and loose gate. The verdict on this fixture means nothing, and these tests check what the record contains, not which way it went. The tests are marked `slow` one by one, as Task 9's are: the refusals fit nothing, and Decision 13 keeps the tier for fits.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `tests/integration/test_cli_validate_state_model.py`:
 
@@ -7968,7 +7991,7 @@ def test_a_fit_from_another_constraint_set_is_refused_before_anything_is_deleted
     assert all(path.read_text() == "from an earlier validation" for path in earlier)
 ```
 
-- [ ] **Step 2: Run them to watch them fail**
+- [x] **Step 2: Run them to watch them fail**
 
 Run: `uv run pytest tests/integration/test_cli_validate_state_model.py -q`
 
@@ -7993,7 +8016,7 @@ FAILED tests/integration/test_cli_validate_state_model.py::test_a_fit_from_anoth
 
 The other four were deselected while this plan was written, because the `validated` fixture's fit writes a store (Task 7's caveat). Each errors at setup here, on `No such command 'validate-state-model'`. The refusal test checks `stale0hash` before `fit-state-model` because Typer's suggestion above holds the second token: only the first fails for the right reason here.
 
-- [ ] **Step 3: Add the command**
+- [x] **Step 3: Add the command**
 
 `src/logging_employment/cli.py`:
 
@@ -8148,13 +8171,13 @@ index 484e335..e3d7cac 100644
 +    typer.echo(f"verdict {record['verdict']}; selected {record['selected_method']}")
 ```
 
-- [ ] **Step 4: Run the tests to see them pass**
+- [x] **Step 4: Run the tests to see them pass**
 
 Run: `uv run pytest tests/integration/test_cli_validate_state_model.py -q`
 
 Expected: `8 passed`. The module-scoped fixture runs `validate`, `fit-state-model` and then seven replicate fits, so allow several minutes. **Four of the eight were never executed while this plan was written** (the `validated` fixture). The four that ran passed: `4 passed, 4 deselected`. If only the four fail, re-run Task 7's store tests and Task 9's store tests first.
 
-- [ ] **Step 5: Gates**
+- [x] **Step 5: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -8163,7 +8186,7 @@ uv run pytest -q -p no:cacheprovider -m "not slow"
 
 Expected: gates clean. Non-slow suite: Task 12's count **+ 3 passed**: the two refusal cases and `test_the_command_requires_the_comparand`, which fit nothing. The five `slow` tests ran in Step 4.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/logging_employment/cli.py tests/integration/test_cli_validate_state_model.py
@@ -8187,7 +8210,7 @@ Nothing here claims Task 15's results. Task 15 writes what the D1 re-run and the
 
 **Interfaces:** none. Documentation only.
 
-- [ ] **Step 1: Write the package's own guide**
+- [x] **Step 1: Write the package's own guide**
 
 `src/logging_employment/models/CLAUDE.md`:
 
@@ -8318,7 +8341,7 @@ states) and checks §17.5's recovery rows. Its bounds were first run on arviz-st
 while plan 16 was written, and its docstrings give the arithmetic behind each one.
 ````
 
-- [ ] **Step 2: Update the root guide, the CI comment, and the three neighbouring guides**
+- [x] **Step 2: Update the root guide, the CI comment, and the three neighbouring guides**
 
 `CLAUDE.md` and `.github/workflows/ci.yml`:
 
@@ -8665,13 +8688,13 @@ index 97c13a5..0893c03 100644
  - **Every `tests/unit/test_validate_*.py` module that loads `data/staged` is now guarded**
 ````
 
-- [ ] **Step 3: Re-measure the marker census the root guide now states**
+- [x] **Step 3: Re-measure the marker census the root guide now states**
 
 Run: `grep -rn "mark\.slow" tests | wc -l`
 
 Expected: `17`. That is one unit test, plus eight integration modules, with `test_cli_state_model.py` and `test_cli_validate_state_model.py` marked per test (five sites each) because their other tests fit nothing.
 
-- [ ] **Step 4: Run the whole suite, slow tier included, with `data/` linked**
+- [x] **Step 4: Run the whole suite, slow tier included, with `data/` linked**
 
 ```bash
 uv run pytest -q -p no:cacheprovider
@@ -8679,7 +8702,12 @@ uv run pytest -q -p no:cacheprovider
 
 Expected: Task 0's bare count **+ 145 passed**, 0 failed, skipped unchanged. Most of the run is Task 0's slow D1 tests, about 12 minutes. Task 10 took 34 s when observed. Tasks 9 and 13 add their store tests, which never ran while this plan was written. Their fixtures fit at 2 chains of 60 warmup and 60 draws, and the two of their slow tests that did run took 28 s together, so expect minutes, not tens of minutes.
 
-- [ ] **Step 5: Measure the two counts the guides quote, without `data/`**
+- [x] **Step 5: Measure the two counts the guides quote, without `data/`**
+
+> Deviation (per this step's own note): measured 1681 passed, 72 skipped for the bare run and 1661
+> passed, 45 skipped, 47 deselected for the CI expression, not the written 1643/72 and 1623/45/47,
+> which were predicted at `40b2688`. The +38 is main's #38 (+33) and #39 (+5). `CLAUDE.md` and
+> `ci.yml` carry the measured numbers, and `specs/findings/stage-5-log.md` records the difference.
 
 The symlink is moved aside and put back. Nothing under the main checkout is touched.
 
@@ -8692,7 +8720,7 @@ mv data.unlinked data && ls data/staged
 
 Expected: `1643 passed, 72 skipped` for the bare run, and `1623 passed, 45 skipped, 47 deselected` for the CI expression. Those are the numbers Step 2 wrote into `CLAUDE.md` and `ci.yml`. **If either differs, write the measured numbers into both files, and report the difference in the Task 15 log entry.** Never adjust a test to meet a written count. The arithmetic is the check: skipped stays at 72 and 45, because every test this plan adds runs without `data/`.
 
-- [ ] **Step 6: Gates**
+- [x] **Step 6: Gates**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -8700,7 +8728,7 @@ uv run ruff format --check src tests && uv run ruff check src tests && uv run in
 
 Expected: all clean.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add CLAUDE.md .github/workflows/ci.yml src/logging_employment/models/CLAUDE.md src/logging_employment/validate/CLAUDE.md src/logging_employment/reconcile/CLAUDE.md src/logging_employment/baselines/CLAUDE.md
@@ -8727,7 +8755,7 @@ git commit -m "docs: the models package, its commands, and the suite counts plan
 
 **Interfaces:** consumes every command this plan built. Produces nothing later tasks import.
 
-- [ ] **Step 1: Preconditions**
+- [x] **Step 1: Preconditions**
 
 ```bash
 git log --oneline -1
@@ -8738,7 +8766,7 @@ ls runs/4cf47a918dd8
 
 Expected: Task 14's commit; `14352bb8e56e dd7337e89047`; `runs/dd7337e89047 is free`; and the comparand's 14 entries, `baseline_results/` among them. **STOP if `runs/dd7337e89047` exists.** Something already wrote under the new id, and a byte comparison against a directory of unknown history proves nothing.
 
-- [ ] **Step 2: Keep a copy of the shared constraint tables**
+- [x] **Step 2: Keep a copy of the shared constraint tables**
 
 `build-constraints` writes `data/constraints/`, which is the MAIN checkout's, through the Task 0 symlink. The re-run must rewrite it with identical bytes, and this copy is what Step 4 proves that against.
 
@@ -8750,7 +8778,11 @@ ls /tmp/plan16-constraints-before
 
 Expected: `constraint_coefficient.parquet`, `constraint_row.parquet` and `target_cell.parquet`.
 
-- [ ] **Step 3: Re-run the comparand's chain under the new id**
+- [x] **Step 3: Re-run the comparand's chain under the new id**
+
+> Deviation (mechanical): each command ran alone, in the background under `/usr/bin/time -p`, its
+> exit status checked before the next, because a foreground call is killed at 10 minutes and
+> `validate` took 11.5. All five exited 0.
 
 ```bash
 for command in build-constraints solve-bounds run-baselines reconcile validate; do
@@ -8760,7 +8792,10 @@ done
 
 Expected: every command exits 0. `validate` takes about 12.5 minutes on D1, measured on the comparand. **STOP on any failure.** The comparand's inputs and config are unchanged except `model:`, which none of these five commands reads.
 
-- [ ] **Step 4: Prove the re-run byte-identical to the comparand**
+- [x] **Step 4: Prove the re-run byte-identical to the comparand**
+
+> Deviation (mechanical): the heredoc ran from a file whose text diffs identical to it. It printed
+> the step's line and exited 0.
 
 ```bash
 uv run python - <<'EOF'
@@ -8814,7 +8849,10 @@ EOF
 
 Expected: `… identical`, exit 0. Every Parquet file matches by sha256. Every JSON manifest matches except `code_commit` and `uv_lock_sha256`: the commit is new, and so is the lock (Task 1). No manifest in the comparand names its own run id, which was checked while this plan was written. `config.resolved.yaml` differs only by `model:` and `promotion.catastrophic_stratum_coverage_alpha`. **STOP on any difference.** If the constraint tables differ, first restore them from `/tmp/plan16-constraints-before/`, because the main checkout's session reads them. Then report. Do not fit a model against a comparand this plan changed.
 
-- [ ] **Step 5: Fit the production model**
+- [x] **Step 5: Fit the production model**
+
+> Deviation (mechanical): `fit-state-model` ran in the background under `/usr/bin/time -p`, for the
+> same 10-minute limit. It exited 0 in 139.5 s, and the gate passed.
 
 ```bash
 time uv run logging-estimates fit-state-model --config config.yaml; echo "exit $?"
@@ -8826,7 +8864,10 @@ Expected, per Decision 15: `exit 0`, and `diagnostics.json` shows `"passed": tru
 - **The gate passed:** run `uv run logging-estimates reconcile --config config.yaml`. Expected: exit 0, with `state_model.passed` true in `reconcile_manifest.json`. Then apply the timing guard. **If `fit-state-model` took more than 10 minutes, run Step 5a, then STOP before Step 6** and report its time. That is about three times the measured wall time, and Step 6 fits 27 more.
 - **The gate failed, which Decision 15 did not observe: STOP.** Report `diagnostics.json` in full. Nothing else is written, by design (Task 9). A failure here contradicts Decision 15's measurement. Your human partner decides whether to record it, since Step 6 would write `not_beaten` without spending replicate fits (Decision 9), or to investigate the locked versions first.
 
-- [ ] **Step 5a: Count the imputed cells whose interval is a bound**
+- [x] **Step 5a: Count the imputed cells whose interval is a bound**
+
+> Deviation (mechanical): the heredoc ran from a file whose text diffs identical to it, and the
+> by-state table was printed again in full, because polars truncates a printed frame at 10 rows.
 
 Decision 15 found 192 imputed cells at the config's seed whose 90% interval had zero width on their §9 upper bound, 177 of them in both seeds it ran. In most of them the raw model overshoots the bound. This step measures the same thing on the executed fit. It gates nothing, and its count goes into Step 8's entry.
 
@@ -8846,7 +8887,10 @@ EOF
 
 Expected: `1227 imputed`, and about 190 zero-width intervals, every one on the upper bound. The older environment gave 192: VT (50) 65, NM (35) 29, NH (33) 22, CO (08) 21, UT (49) 16, and 39 across seven more states. The locked versions' draws can move the count. Whatever it is, record it.
 
-- [ ] **Step 6: Write the promotion record**
+- [x] **Step 6: Write the promotion record**
+
+> Deviation (mechanical): run under `/usr/bin/time -p`, with a watchdog at the 4-hour limit. It
+> finished in 63.8 minutes and exited 0.
 
 Run it in the background. It fits 27 replicates, about 77 minutes at Decision 15's measured speed.
 
@@ -8863,7 +8907,7 @@ Expected: `exit 0`, whichever the verdict.
 
 **The verdict was not measured while this plan was written, and whichever one this records is the result.** Do not re-run with other seeds, settings or regimes to change it. If a replicate's gate failed, `gates.convergence.replicate_failures` names it, and Decision 4 makes the verdict `not_beaten`. **If it has not finished after 4 hours, stop it and STOP**, reporting how far it got. That is about three times the measured estimate.
 
-- [ ] **Step 7: State what is now true in the guides**
+- [x] **Step 7: State what is now true in the guides**
 
 `CLAUDE.md`, in the gotcha Task 14 wrote about the re-id, replace:
 
@@ -8894,7 +8938,7 @@ with:
 
 `src/logging_employment/models/CLAUDE.md`: append a bullet to its read-first list that states Step 5's gate result and Step 6's verdict as a dated witness. Include the date, the run id, `passed`, each gating check's value, the fit's wall time, `mean_leapfrog_steps` and `tree_depth_saturation_share`, Step 5a's count, the verdict, and a pointer to `specs/findings/stage-5-log.md`.
 
-- [ ] **Step 8: Append the stage log entry**
+- [x] **Step 8: Append the stage log entry**
 
 Append one entry to `specs/findings/stage-5-log.md`, in its own format (`## YYYY-MM-DD — …`, then prose). It records:
 - the base commit;
@@ -8906,7 +8950,7 @@ Append one entry to `specs/findings/stage-5-log.md`, in its own format (`## YYYY
 - Task 12 Step 4's tripwire output, the evidence `D-109`'s done-when asks for;
 - a sentence saying what stays open for the Plan Completion Protocol: Decision 7's four flagged readings, Decision 15's open points (the cells whose interval is a bound, and the unstable means in NV and RI), `run-baselines`' unchecked bounds hash (Decision 9), and `D-116`'s and `D-115`'s dispositions (Decision 1).
 
-- [ ] **Step 9: Gates and commit**
+- [x] **Step 9: Gates and commit**
 
 ```bash
 uv run ruff format --check src tests && uv run ruff check src tests && uv run interrogate src
@@ -8914,7 +8958,7 @@ git add CLAUDE.md src/logging_employment/validate/CLAUDE.md src/logging_employme
 git commit -m "docs(findings): plan 16's D1 run: the comparand re-run byte for byte, the fit, the record"
 ```
 
-- [ ] **Step 10: STOP for your human partner**
+- [x] **Step 10: STOP for your human partner**
 
 Report:
 - Step 4's line;

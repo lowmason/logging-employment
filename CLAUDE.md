@@ -3,8 +3,10 @@
 Monthly state Logging (NAICS 113310, private ownership, states + DC, 2017-01..2024-12) employment
 by establishment size class, for the cells BLS suppresses for disclosure. Identification precedes
 imputation: sharp LP/MILP bounds from public accounting facts (§9), then transparent baselines
-(§10), exact reconciliation (§12), then a pseudo-suppression harness (§13). Sources are QCEW,
-QCEW-by-size and CBP. The §11 Bayesian model is not built yet.
+(§10), exact reconciliation (§12), a pseudo-suppression harness (§13), and §11's state-total model,
+scored by that same harness (plan 16). Sources are QCEW, QCEW-by-size and CBP. §11's
+size-composition model is Stage 6's, and the state model's §13.10 promotion record stays
+provisional until Stage 7 re-runs the gate.
 
 **The spec is authoritative and this codebase cites it constantly.**
 `specs/logging-employment-spec.md` — §3 estimand, §4 invariants (`INV-001`..`INV-016`), §6.2
@@ -28,33 +30,51 @@ logging-estimates fetch --source qcew --config config.yaml   # or qcew_parent / 
                                                              # CENSUS_API_KEY from ./.env
 # then, in order:
 build-harmonized → build-constraints → solve-bounds → run-baselines → reconcile → validate
+# §11's state-total model (plan 16), on the same run directory:
+fit-state-model   # after solve-bounds; `reconcile` then also re-verifies the stored draws
+validate-state-model   # after validate and fit-state-model; writes promotion_record.json
 ```
 
 Every command takes `--config config.yaml` and must be idempotent for the same inputs (§16.1);
 each gates on the previous one's artifact and refuses with the missing path
-(`cli.py::{solve_bounds_command, run_baselines_command, reconcile_command}` — symbols, not line
-numbers, because plan 13 drifted the old `:250` / `:349` pins by inserting above them).
+(`cli.py::{solve_bounds_command, run_baselines_command, reconcile_command,
+fit_state_model_command, validate_state_model_command}` — symbols, not line numbers, because plan
+13 drifted the old `:250` / `:349` pins by inserting above them).
 **`run-baselines` gates on TWO** as of plan 13 (R-S5P-3): `schema_manifest.json` *and*
 `deterministic_bounds.parquet`, so `solve-bounds` is a hard precondition rather than an advisory
 step in the documented order — every estimate is checked against its §9 interval (INV-002's
 per-cell half) instead of the check being skipped when its input is absent. `validate --estimators a,b` scores a subset in its own run dir. `--help` is the real
-command list — five of §16.1's fifteen do not exist yet (`fit-state-model`, `fit-size-model`,
-`disclosure-review`, `publish`, `run-all`).
+command list — four of §16.1's fifteen do not exist yet (`fit-size-model`, `disclosure-review`,
+`publish`, `run-all`). `validate-state-model` is not one of the fifteen: plan 16 added it so that
+`validate` stays the §13.10 comparand's command, byte for byte. `fit-state-model` gates on
+`schema_manifest.json` and `deterministic_bounds.parquet`, and refuses bounds solved against another
+`constraint_set_hash`; `validate-state-model` on the three `validation_*` tables and
+`posterior/diagnostics.json`. The two commands that read a fit, `reconcile` and
+`validate-state-model`, refuse one whose `diagnostics.json` names another `constraint_set_hash`
+(`cli.py::_stale_fit`): a fit outlives its constraint set whenever `build-constraints` re-runs
+without a re-fit, and its draws would re-verify clean against their own bounds.
 
-Markers are declared but never applied by `addopts`: `slow` is on one unit test and FIVE
-integration modules (measured 2026-09-10: six `mark.slow` sites) and nothing excludes it locally (pass `-m "not slow"` yourself), and `network` is
-declared — its help text even says "excluded from the default run" — but no test carries it.
+Markers are declared but never applied by `addopts`: `slow` is on one unit test and EIGHT
+integration modules (seventeen `mark.slow` sites since plan 16, which added the three model
+modules: every NUTS fit bigger than `test_state_total_model.py`'s toy) and nothing excludes it
+locally (pass `-m "not slow"` yourself), and `network` is declared — its help text even says
+"excluded from the default run" — but no test carries it.
 
 **CI** (`.github/workflows/ci.yml`, added 2026-09-13) runs the four gates above on every push to
 `main` and every PR, after `uv sync --locked`, with `pytest -m "not slow and not network"`. It is
 the hermetic tier only: no runner has `data/`, so every data-bound test skips there by design, and
 a green check says nothing about the D1 integration tests — those still need a local run where
-`data/` lives. Measured 2026-09-13 without `data/`: the expression deselects 27 tests (the six
-`slow` sites are mostly module-level) and passed stays at 1408, so it removes nothing that would
-have run. Nothing else is deselected. Those counts are THIS MAC's: ubuntu-latest reports 1407
-passed, 46 skipped, 27 deselected (run 34765933053), because
+`data/` lives. Since plan 16 the expression DOES remove tests that would have run: the 20 slow
+model tests (5 in `test_cli_state_model.py`, 5 in `test_cli_validate_state_model.py`, 10 in
+`test_state_total_recovery.py`) need no `data/`, only minutes of NUTS. Collected at plan 16's
+Task 14 without `data/`: a bare run is 1681 passed, 72 skipped; the hermetic tier 1661 passed, 45
+skipped, 47 deselected (27 data-bound, 20 slow model tests). Those counts are THIS MAC's: on
+ubuntu-latest one more test skips (1407 passed, 46 skipped, 27 deselected before plan 16, run
+34765933053), because
 `tests/audit/test_qcew_codes.py::test_period_basis_quotes_the_reference_verbatim_where_the_reference_is_readable`
-skips where the personal `~/.claude/skills/bls-data-context/` reference is absent (D-055).
+skips where the personal `~/.claude/skills/bls-data-context/` reference is absent (D-055). `uv sync
+--locked` installs JAX, NumPyro, ArviZ and h5netcdf there since plan 16, and the hermetic tier runs
+the API probes and the toy fits.
 
 **Float goldens compare through `tests/golden_compare.py`, not `.equals`** (2026-09-13). The two
 float goldens (`test_validation_golden.py::test_the_metrics_match_the_golden`,
@@ -75,7 +95,9 @@ diff old against new by join before re-pinning one (§17.6).
 five harmonized Parquet tables (`contracts.HarmonizedData`), never an endpoint. `build-constraints`
 turns those into a cell/row/coefficient system, `solve-bounds` bounds each component,
 `run-baselines` produces weights that `reconcile/` turns into estimates, `validate` re-runs it under
-synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per command.
+synthetic masks. `fit-state-model` fits §11's state-total model and passes every draw through the
+same `reconcile/` layer, and `validate-state-model` scores it through the same harness. Outputs land
+in `runs/<run_id>/` beside one JSON manifest per command.
 
 | Module | Owns |
 |---|---|
@@ -94,6 +116,7 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
 | `reconcile/` | §12 exact reconciliation → see `reconcile/CLAUDE.md` |
 | `baselines/` | §10 transparent baselines → see `baselines/CLAUDE.md` |
 | `validate/` | §13 pseudo-suppression harness → see `validate/CLAUDE.md` |
+| `models/` | §11's state-total model: `ModelData`, the NumPyro fit, per-draw reconciliation, the §11.14 gate, §7.11's `posterior_summary`, the ArviZ store → see `models/CLAUDE.md` |
 | `registry/` | §7.1 source registry: row model, `registry/sources.yaml`, `registry verify`'s checks |
 | `disclosure/` | §9.8 flags only — `exact_reconstruction_flag`, `narrow_feasible_interval_flag`, on suppressed cells only, thresholds from config |
 
@@ -177,13 +200,27 @@ synthetic masks. Outputs land in `runs/<run_id>/` beside one JSON manifest per c
   fields to `SourcesConfig` and moved no id, because each is `Field(default=None, exclude=True)`
   and so reaches no dump — that is the second remedy, for a key nothing outside `config.py` reads. For a CLI-only choice use `run_id`'s `overrides`,
   omitting the key when unset (`runs.py` docstring), so existing runs keep their id.
+  **Plan 16 re-identified every run once, on purpose**: `model:` stays in the dump because every
+  key in it changes the draws, and `promotion.catastrophic_stratum_coverage_alpha` was added in the
+  same commit so the id moved once. The config-only canary moved `39d1d0859838` → `14352bb8e56e`
+  and the staged pin `4cf47a918dd8` → `dd7337e89047`. The §13.10 comparand was re-run under the
+  new id and matched `runs/4cf47a918dd8` byte for byte, manifests aside from `code_commit` and
+  `uv_lock_sha256` (`specs/findings/stage-5-log.md`).
 - **A run directory can be stale w.r.t. your code.** `run_id` ignores source, so editing an
   estimator and re-running overwrites the same `runs/<id>/`. The one cross-stage check that does
-  fire is `constraint_set_hash` (see `constraints/CLAUDE.md`).
+  fire is `constraint_set_hash` (see `constraints/CLAUDE.md`). `solve-bounds` checks the constraint
+  tables against it, `fit-state-model` checks the bounds, and `reconcile` and
+  `validate-state-model` check the fit (plan 16); `run-baselines` reads the bounds without
+  comparing.
 - **CBP responses are not byte-reproducible** — set-identical rows in a different order, so each
   re-fetch stores another object for the same year. `build.snapshot_paths` raises
   `AmbiguousSnapshotError` (`build.py::snapshot_paths`) rather than stacking two snapshots of one key; pass the
   run manifest.
+- **`models/state_total.py` switches JAX to float64 when it is imported** (`numpyro.enable_x64()`),
+  and `_fit_numpyro` refuses to sample in float32, because `reconcile_draws` checks adding-up to
+  1e-9. Import it before any other JAX work. `cli.py` imports every model module inside the command
+  that needs it, so `--help`, `validate` and the baseline commands never initialise JAX. Chains run
+  `vectorized` in one process, so `numpyro.set_host_device_count` is never called.
 - **Government APIs answer 200 with an error body.** `ingest/base.HttpFetcher` returns
   non-200 responses instead of raising, exactly so the caller classifies on content, not status.
 - **`scripts/audit/` is destructive-first.** Standalone PEP 723 files (`uv run --no-project`),

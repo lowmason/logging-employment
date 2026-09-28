@@ -139,7 +139,8 @@ def test_a_stratum_kind_outside_the_declared_set_is_refused():
     """removing `("stratum_kind", STRATUM_KINDS)` from the provenance loop must redden this.
 
     `validate/harness.py` runs the gate over the assembled metrics frame; without a refusal test
-    the entry could be deleted with the suite green, which is `INTERVAL_SOURCES`' situation.
+    the entry could be deleted with the suite green, which was `INTERVAL_SOURCES`' situation until
+    plan 16 gave it one (below).
     """
     frame = pl.DataFrame({"stratum_kind": ["overall", "by_state"]})
     with pytest.raises(ConceptViolationError, match="stratum_kind"):
@@ -149,4 +150,17 @@ def test_a_stratum_kind_outside_the_declared_set_is_refused():
 def test_every_declared_stratum_kind_passes():
     contracts.assert_declared_provenance(
         pl.DataFrame({"stratum_kind": list(contracts.STRATUM_KINDS)})
+    )
+
+
+def test_an_interval_source_outside_the_declared_set_is_refused():
+    """Plan 16: the harness gates its assembled metrics, so a producer cannot invent a source."""
+    frame = pl.DataFrame({"interval_source": ["reconciled_posterior_draws", "rolling_window"]})
+    with pytest.raises(ConceptViolationError, match="interval_source"):
+        contracts.assert_declared_provenance(frame)
+
+
+def test_every_declared_interval_source_passes():
+    contracts.assert_declared_provenance(
+        pl.DataFrame({"interval_source": list(contracts.INTERVAL_SOURCES)})
     )

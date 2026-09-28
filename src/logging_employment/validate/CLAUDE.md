@@ -3,8 +3,9 @@
 Hides cells QCEW actually published, re-runs the §10 baselines and rebuilds and re-solves the §9
 constraint system on the masked frame, then scores the estimates against the withheld truth. Spec
 map: §13.2 → `propensity` + `regimes`, §13.3 → `regimes`, §13.4 → `leakage`, §13.5-13.8 →
-`metrics`, §13.10 → `scoreboard`; also §10.7 → `intervals`, §10.8 → `scoreboard`'s hierarchy
-restriction, §16.2 → `harness.run_pseudo_suppression`.
+`metrics`, §13.10 → `scoreboard` (the comparand) and `promotion` (the record, plan 16); also §10.7
+→ `intervals`, §10.8 → `scoreboard`'s hierarchy restriction, §16.2 →
+`harness.run_pseudo_suppression`.
 
 ## Read this first: the config knobs do not do what they look like
 
@@ -42,11 +43,25 @@ restriction, §16.2 → `harness.run_pseudo_suppression`.
 
 ## The boundary
 
-One entry point: `run_pseudo_suppression(data, estimators, config) -> ValidationResult(scores,
-metrics, scoreboard, manifest)`. The only production caller is `cli.py::validate_command`
-(`logging-estimates validate`), which writes `validation_scores.parquet`,
-`validation_metrics.parquet`, `validation_scoreboard.parquet` and `validation_manifest.json` into
-`runs/<id>/`.
+One entry point: `run_pseudo_suppression(data, estimators=None, config=None, *, producer=None) ->
+ValidationResult(scores, metrics, scoreboard, manifest)`. Two production callers.
+`cli.py::validate_command` (`logging-estimates validate`) scores §10's registry and writes
+`validation_scores.parquet`, `validation_metrics.parquet`, `validation_scoreboard.parquet` and
+`validation_manifest.json` into `runs/<id>/`. Since plan 16, `cli.py::validate_state_model_command`
+scores §11's model through `producer=StateModelProducer()` and writes the same three tables into
+`runs/<id>/state_model_validation/`, then §13.10's record to `runs/<id>/promotion_record.json`.
+
+- **The producer seam (plan 16).** A `harness.Producer` turns one masked frame and its
+  `MaskedSystem` into `Production(results, interval_metrics, notes)`. `BaselineProducer` wraps
+  `run_baselines` under the masked bounds (`D-087`) with `probabilistic_metrics`, and it is what
+  `estimators=` builds, so `validate`'s output is byte-identical to Stage 4's.
+  `models/validation.py::StateModelProducer` fits the model on the masked frame, reconciles every
+  draw into the MASKED bounds, and scores each cell's interval from its own reconciled draws
+  (`metrics.draw_interval_metrics`, `interval_source = 'reconciled_posterior_draws'`). Everything
+  else is shared, which is the point of the seam: the masks, the leakage guard, §13.5's halt, step
+  6's rejection and every emitter. Passing both `estimators` and `producer` is refused. `notes`
+  reach the regime's manifest entry as `producer_notes` only when non-empty, which is how each
+  replicate fit's §11.14 gate report reaches §13.10's convergence gate.
 
 - **§16.2's signature is deviated from deliberately.** The spec writes `config: ValidationConfig`;
   the implementation takes the whole `Config` (it needs `config.constraints` for `solve_bounds` and
@@ -220,6 +235,34 @@ metrics, scoreboard, manifest)`. The only production caller is `cli.py::validate
 - `intervals` offers CRPS and refuses log score on purpose: an empirical ensemble gives -inf
   whenever the truth falls outside its range. §13.7 permits either.
 
+## §13.10's promotion record (plan 16)
+
+`promotion.evaluate_promotion` is the ONLY reader of `config.promotion`'s four keys, and
+`tests/unit/test_config_validation_block.py::test_the_promotion_keys_are_read_only_by_the_promotion_record`
+reddens on a second reader. It compares the model's `state_model_validation/` tables against the
+SAME run's `validate` tables, whose digests the record carries. The readings §13.10 leaves open are
+plan 16's Decision 4, and each is written into the record beside its evidence:
+
+- **Coverage is pooled** over every regime and seed, and per-regime values are reported but gate
+  nothing, because `whole_seasonal` is about 69% of the pool (`D-106`). The comparison is EXACT
+  (`D-109`): hits over `calibration_sample_size` as a `Fraction` against
+  `Fraction(repr(tolerance))`, so 17/20 is within 0.90 ± 0.05.
+- **Catastrophic** means the exact binomial lower tail at 0.90 falls below
+  `catastrophic_stratum_coverage_alpha` (0.001), per regime and per Census division pooled.
+- **WAPE improvement** is per regime, on matched (seed, cell) pairs, relative, at least
+  `minimum_wape_improvement`. A regime whose comparand is `None` (`scoreboard.preferred_baseline`)
+  is `not_applicable`, and the gate fails when no regime has a comparand at all.
+- **Degradation** is per division pooled across regimes, relative, above
+  `maximum_major_stratum_wape_degradation`.
+- The hard-constraint and convergence gates read the production fit AND every replicate fit's
+  report (`producer_notes`). Hard constraints read each replicate's reconciliation checks, which
+  the `replicate` scope records without gating; convergence reads each replicate's own verdict,
+  which gates on divergences and parameter R-hat only (`models/diagnostics.py`).
+- The verdict is `beat` or `not_beaten`, `selected_method` is the model or
+  `section_10_8_hierarchy`, `provisional` is always true (Stage 7 re-runs the gate with the harvest
+  factor), and disclosure review is `pending_stage_8`. A production fit that failed §11.14 gets a
+  `not_beaten` record without being scored.
+
 ## Tests, commands, and the environment
 
 ```bash
@@ -228,7 +271,10 @@ uv run pytest tests/unit/test_validate_scoreboard.py tests/unit/test_validate_in
   tests/unit/test_validate_metrics_bounds.py tests/unit/test_validate_metrics_constraint.py
   # 62 passed (measured 2026-09-12 at `19fbdec`, +3 for D-112's sign tests; 59 after plan 14's review fixes, 40 over the five modules before plan 14) — no data/ needed
 uv run pytest tests/integration/test_validation_golden.py   # 7 passed, 11s — in-git fixtures
+uv run pytest tests/unit/test_validate_producer_seam.py tests/unit/test_validate_metrics_draws.py \
+  tests/unit/test_validate_promotion.py   # plan 16's seam, draw intervals and record — no data/
 uv run logging-estimates validate --config config.yaml [--estimators id,id]
+uv run logging-estimates validate-state-model --config config.yaml   # 27 fits on D1 (plan 16)
 ```
 
 - **Every `tests/unit/test_validate_*.py` module that loads `data/staged` is now guarded**
@@ -256,5 +302,6 @@ uv run logging-estimates validate --config config.yaml [--estimators id,id]
 - The dated D1 numbers this package quotes (4,716 state cells in single-cell components before
   plan 15, 756 of which now share one with their `state_parent`; 272/400 fully observed
   state-years; the six never-observed FIPS; `runs/f03023ac9f3a`, superseded as §13.10's comparand
-  by `runs/4cf47a918dd8`) live in the docstrings and in `tests/unit/test_validate_regimes.py`.
+  by `runs/4cf47a918dd8`, re-run byte for byte by plan 16 as `runs/dd7337e89047` when the `model:`
+  block re-identified every run) live in the docstrings and in `tests/unit/test_validate_regimes.py`.
   Recompute before citing one.

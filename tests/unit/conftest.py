@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import numpy as np
 import polars as pl
 import pytest
 
@@ -19,6 +20,8 @@ from logging_employment.contracts import (
     QCEW_NATIONAL_SIZE_SCHEMA,
     HarmonizedData,
 )
+from logging_employment.models.interfaces import StateModelFit
+from logging_employment.reconcile.draws import PosteriorDraws
 
 _MONTHLY_DEFAULTS: dict[str, object] = {
     "snapshot_id": "2024q1",
@@ -219,3 +222,43 @@ def harmonized_toy(make_monthly) -> HarmonizedData:
         cbp_state_size=cbp,
         bridge=pl.DataFrame([], schema=BRIDGE_SCHEMA),
     )
+
+
+@pytest.fixture()
+def make_state_fit() -> Callable[..., StateModelFit]:
+    """Build a `StateModelFit` from raw-score draws alone, with no sampler behind it.
+
+    The fit's consumers -- reconciliation, the gate, the summary, the store -- read arrays, not a
+    sampler, so their tests need not pay for MCMC or import JAX. Draws are chain-major, as
+    `models/state_total.py` lays them out: `values[c * per_chain + d]` is chain c, draw d.
+    """
+
+    def _build(
+        values: np.ndarray,
+        cell_ids: tuple[str, ...],
+        *,
+        chains: int = 2,
+        parameters: dict[str, np.ndarray] | None = None,
+        diverging: np.ndarray | None = None,
+        ppc_coverage_90: float = 0.9,
+    ) -> StateModelFit:
+        values = np.asarray(values, dtype=np.float64)
+        per_chain = values.shape[0] // chains
+        return StateModelFit(
+            raw_scores=PosteriorDraws(
+                cell_ids=tuple(cell_ids),
+                values=values,
+                chain=np.repeat(np.arange(chains), per_chain),
+                draw=np.tile(np.arange(per_chain), chains),
+            ),
+            parameters={} if parameters is None else parameters,
+            diverging=(
+                np.zeros((chains, per_chain), dtype=bool) if diverging is None else diverging
+            ),
+            ppc_coverage_90=ppc_coverage_90,
+            ppc_cells=0,
+            posterior_medians={"sigma_eta": 0.1, "rho": 0.8},
+            sampler={"chain_method": "vectorized"},
+        )
+
+    return _build

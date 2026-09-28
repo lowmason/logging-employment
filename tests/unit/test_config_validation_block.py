@@ -1,4 +1,5 @@
 import ast
+import math
 from pathlib import Path
 
 import pytest
@@ -34,11 +35,43 @@ def test_promotion_gates_carry_appendix_a_defaults():
     assert p.nominal_coverage_tolerance == 0.05
 
 
+def test_the_catastrophic_coverage_alpha_is_one_in_a_thousand():
+    """Plan 16's origination: §13.10 says "does not fail catastrophically" and states no number.
+
+    At 0.001 over 18 strata (9 regimes, 9 divisions), a calibrated model is flagged somewhere with
+    probability 0.0122 (the plan's Decision 4).
+    """
+    assert PromotionConfig().catastrophic_stratum_coverage_alpha == 0.001
+
+
+def test_every_promotion_threshold_is_finite_and_the_alpha_is_a_probability():
+    """Plan 16's promotion record is the first code to read these, and a non-finite one breaks it
+    silently or late. A NaN degradation ceiling or alpha makes its comparison false, so the gate
+    stops flagging degraded divisions or catastrophic strata. `-inf` counts every regime's WAPE as
+    improved. A NaN or infinite tolerance raises inside `Fraction`, but only after the replicate
+    fits. So each is refused at load, naming the field (§18.3). Read off the model, so a threshold
+    added later is covered, and the count fails first. An alpha at or below 0 is the same silence
+    as a NaN one, because `cdf < alpha` can never hold."""
+    floats = [
+        name for name, field in PromotionConfig.model_fields.items() if field.annotation is float
+    ]
+    assert len(floats) == 4
+    for name in floats:
+        for value in (math.inf, -math.inf, math.nan):
+            with pytest.raises(ValidationError, match=name):
+                PromotionConfig.model_validate({name: value})
+    for alpha in (0.0, -0.1, 1.0):
+        with pytest.raises(ValidationError, match="catastrophic_stratum_coverage_alpha"):
+            PromotionConfig.model_validate({"catastrophic_stratum_coverage_alpha": alpha})
+
+
 PROMOTION_KEYS = frozenset(
     {
         "minimum_wape_improvement",
         "maximum_major_stratum_wape_degradation",
         "nominal_coverage_tolerance",
+        # Plan 16's, and watched by the same tripwire from the day it was declared.
+        "catastrophic_stratum_coverage_alpha",
     }
 )
 
@@ -105,16 +138,16 @@ def test_the_tripwire_detector_sees_reads_and_ignores_mentions():
     assert _named_keys("gate(**cfg.promotion.model_dump())") == set()
 
 
-def test_the_promotion_keys_are_still_unread_and_the_docstring_still_says_so():
-    """R-S5G-3: a TRIPWIRE, not a prohibition. It fails when `src/` code NAMES one of these keys.
+def test_the_promotion_keys_are_read_only_by_the_promotion_record():
+    """R-S5G-3's tripwire, converted when §13.10's evaluator landed (plan 16, `D-109`).
 
-    `PromotionConfig`'s docstring records all three as inert. A docstring cannot notice when it
-    stops being true, and the failure mode is specific: the day a promotion path reads one of
-    these, the note becomes a false statement in the file a reader consults first. Derived from the
-    code's AST (`_named_keys`) rather than asserting a sentence exists, so it tracks code, not prose.
-    `config.py` is scanned too: its field declarations are annotated `Name` targets and do not count,
-    so a validator there that READS a key still trips this. When it reddens, the fix is to update the
-    docstring -- not to delete this test.
+    Until plan 16 this was
+    `test_the_promotion_keys_are_still_unread_and_the_docstring_still_says_so`, and it asserted
+    that no `src/` module named a key. `validate/promotion.py` now reads all four, and this test
+    reddened naming them, as `D-109`'s done-when required. It now pins that module as the ONLY
+    reader, so a second reader -- one that could apply a gate differently -- reddens it again. The
+    fix then is to update `PromotionConfig`'s docstring, not to delete this test. Derived from the
+    code's AST (`_named_keys`), so it tracks code, not prose.
     """
     src = Path(__file__).resolve().parents[2] / "src" / "logging_employment"
     readers = {
@@ -122,4 +155,6 @@ def test_the_promotion_keys_are_still_unread_and_the_docstring_still_says_so():
         for path in sorted(src.rglob("*.py"))
         if (named := _named_keys(path.read_text(encoding="utf-8")))
     }
-    assert readers == {}, f"now read by {readers}; update PromotionConfig's docstring"
+    assert readers == {"validate/promotion.py": sorted(PROMOTION_KEYS)}, (
+        f"now read by {readers}; update PromotionConfig's docstring"
+    )

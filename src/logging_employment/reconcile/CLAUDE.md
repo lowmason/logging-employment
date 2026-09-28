@@ -9,7 +9,8 @@ post-hoc cosmetic adjustment" — there is no config key to skip it.
 
 ## Read this first: most of this package has no production caller yet
 
-Nothing outside `baselines/` calls into this package. `baselines/runner.py::run_baselines` is the
+Two production paths call into this package: `baselines/` since Stage 3, and `models/` since plan
+16. `baselines/runner.py::run_baselines` is the
 production path and calls, in order: `observed_partition` → `closure_audit` →
 `assert_universe_closes` → `national_residual` → `allocate` → `integerize`, and (since R-S5P-3)
 reads `scaling.Bounds` so `runner.assert_within_bounds` can enforce INV-002's per-cell half. Since
@@ -18,10 +19,16 @@ plan 15 it also calls `scaling.scale_into_bounds` wherever `allocate` leaves a f
 context's partition and refuse an anchor that disagrees. The other six `baselines/` modules import
 `Weights` / `Anchor` / `Partition` as types only.
 
+`models/reconciliation.py::reconcile_fit` (plan 16) runs the same gate, `observed_partition` →
+`closure_audit` → `assert_universe_closes`, then calls `national_residual` and
+**`draws.reconcile_draws`** once per month, with a `ReconciliationInputs` built from that month's
+anchor and `deterministic_bounds` projected by `baselines.runner.month_bounds`. Every draw of a
+state-total fit passes through it, and nothing reconciles a draw any other way. And
+`models/arviz_io.py::read_store` rebuilds `Anchor`s from a store's recorded residuals and bases,
+and each one re-checks its basis as it is built (`D-122`, below).
+
 Everything else is implemented, tested, and **dead until a later stage wires it**:
 
-- `draws.reconcile_draws` — no caller; Stage 5 builds `ReconciliationInputs` from
-  `deterministic_bounds` plus the anchor.
 - `matrix.reconcile_matrix` / `projection.kl_project` — no caller; Stage 6, when `target_cell` first
   carries a state×size cell. `matrix.py`'s docstring says so explicitly: "NO REAL INPUT UNTIL STAGE
   6."
@@ -35,7 +42,9 @@ Do not "fix" the empty call sites by inventing one. Do not delete them as dead c
 
 **Name collision:** the `logging-estimates reconcile` CLI command (`cli.py`) imports nothing
 from this package. It re-sums persisted `baseline_results.parquet` estimates against each month's
-recorded residual and reports drift — a verifier, not a producer.
+recorded residual and reports drift, and since plan 16 it also re-checks a stored state-total fit
+(`models.reconciliation.check_reconciled` over `models.arviz_io.read_store`) — a verifier, not a
+producer, either way. A fit from another `constraint_set_hash` fails unread (`cli.py::_stale_fit`).
 
 ## The anchor is a modeling assumption, not a constraint
 
@@ -61,6 +70,9 @@ The load-bearing points:
   `E_{s,t} <= R_t` **must never be written back into `deterministic_bounds`**.
 - Honest caveat already in the docstring: `qtrly_establishments` is constant within a quarter, so
   the per-month gate is quarterly-resolution evidence in a monthly shape.
+- §12.2 says every row allocated against R_t carries its basis. §7.11's `posterior_summary` has no
+  such column, so plan 16 records it in `state_model_manifest.json` (`anchor_bases`) and in the
+  store's `constant_data`, where `models/arviz_io.py::read_store` reads it back into each `Anchor`.
 
 ## Contracts a fresh agent gets wrong
 
@@ -72,7 +84,8 @@ The load-bearing points:
 - **An `Anchor` checks its own basis.** `Anchor.__post_init__` refuses an `anchor_basis` outside
   `contracts.ANCHOR_BASES` with `ConceptViolationError` (`D-122`). The frame guard
   `assert_declared_provenance` cannot cover it: `reconcile_draws` takes the `Anchor` itself, and
-  §7.11's `posterior_summary` carries no `anchor_basis` column.
+  §7.11's `posterior_summary` carries no `anchor_basis` column. Since plan 16 the guard also runs on
+  every anchor `models/arviz_io.py::read_store` rebuilds from a store on disk.
 - **`closure_audit` iterates the months in `monthly`, not the keys of `partitions`**
   (`anchor.py::closure_audit`-171`). A month with a national row and no state rows — the shape a truncated
   ingest produces — would otherwise be skipped in silence.

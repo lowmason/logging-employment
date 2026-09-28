@@ -12,6 +12,7 @@ and is not frozen in any useful sense.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,9 +44,16 @@ class StagedRepo:
     run_dir: Path
 
 
-@pytest.fixture()
-def staged_repo(tmp_path: Path) -> StagedRepo:
-    """A tmp repo holding the frozen Stage 3 staged layer and a built constraint system."""
+def build_staged_repo(
+    tmp_path: Path, *, overrides: Mapping[str, Mapping[str, object]] | None = None
+) -> StagedRepo:
+    """A tmp repo holding the frozen Stage 3 staged layer and a built constraint system.
+
+    `overrides` merges into the shipped config one block at a time, and one level deeper for a
+    nested mapping, so a test can shrink the sampler (`{"model": {"draws": 60}}`) without restating
+    a block. Plan 16 made this a function so its model tests can ask for a small sampler and a
+    loose gate. `staged_repo` is the no-override call every earlier test makes.
+    """
     staged = tmp_path / "staged"
     staged.mkdir()
     for name in STAGED_TABLES:
@@ -57,6 +65,12 @@ def staged_repo(tmp_path: Path) -> StagedRepo:
     raw["storage"]["raw_uri"] = str(tmp_path / "raw")
     raw["storage"]["output_uri"] = str(tmp_path / "runs")
     raw["storage"]["constraints_uri"] = str(tmp_path / "constraints")
+    for block, values in (overrides or {}).items():
+        for key, value in values.items():
+            if isinstance(value, Mapping):
+                raw[block][key] = {**raw[block][key], **value}
+            else:
+                raw[block][key] = value
     config_path = tmp_path / "config.yaml"
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False))
 
@@ -70,3 +84,24 @@ def staged_repo(tmp_path: Path) -> StagedRepo:
     return StagedRepo(
         config_path=config_path, run_dir=run_dir(cfg, run_id(cfg, _input_digests(cfg)))
     )
+
+
+@pytest.fixture()
+def staged_repo(tmp_path: Path) -> StagedRepo:
+    """`build_staged_repo` with the shipped config unchanged."""
+    return build_staged_repo(tmp_path)
+
+
+@pytest.fixture(scope="module")
+def make_staged_repo(tmp_path_factory: pytest.TempPathFactory) -> Callable[..., StagedRepo]:
+    """`build_staged_repo` in a fresh directory per call, for tests that override the config.
+
+    A fixture rather than an import, so a test module never imports a conftest by path. It is
+    module-scoped so a module-scoped fixture can build its repository once and share it; each call
+    still gets its own directory from `tmp_path_factory`.
+    """
+
+    def _build(overrides: Mapping[str, Mapping[str, object]] | None = None) -> StagedRepo:
+        return build_staged_repo(tmp_path_factory.mktemp("repo"), overrides=overrides)
+
+    return _build

@@ -2596,3 +2596,23 @@ Other §21 rows keep their Appendix A defaults until a stage's plan or finding c
 >   four.
 
 - Roadmap: specs/logging-employment-spec-roadmap.md, Stage 5 — on plan completion, tick the stage and re-validate later stages against what shipped.
+> Stage 5: COMPLETE (2026-09-27) — implemented by plan 16
+> (specs/plans/completed/16-stage5-logging-employment-spec.md).
+> Next: resume the roadmap.
+>
+> **The substance is not duplicated here**, for the reason the Stage 3 stamp gives. What Stage 5
+> shipped, and what later stages inherit, is in the roadmap's Stage 5 `SHIPPED` field. The
+> `RE-VALIDATED` lines on Stages 6, 7 and 8 say what each must take from it, and the D1
+> measurements are in `specs/findings/stage-5-log.md`. Two things a later reader must not assume:
+>
+> - **The model was not promoted.** Its D1 promotion record,
+>   `runs/dd7337e89047/promotion_record.json`, is `not_beaten`: coverage, improvement and
+>   convergence failed. So §13.10's "deploy the simpler method" selects `section_10_8_hierarchy`,
+>   and the record is `provisional` until Stage 7 re-runs §13.10 with the harvest factor and
+>   §11.13's variants. §19 Phase 3's acceptance holds on that branch: the production fit's
+>   diagnostics pass (26 of the 27 replicate fits pass theirs), every draw passes the hard
+>   constraints, and the simpler model is retained.
+> - **What Stage 6 allocates is open.** §11.10 allocates "the reconciled state total" on every
+>   draw, but the deployed method gives point estimates, not joint draws, and the model's draws
+>   cover only the 1,227 suppressed state cells. Stage 6's plan settles which totals form its row
+>   margin (the roadmap's Stage 6 `RE-VALIDATED` line).

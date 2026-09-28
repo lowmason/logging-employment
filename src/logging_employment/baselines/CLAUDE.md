@@ -79,11 +79,18 @@ after scaling — a defect, never a `Decline` row. `cli.py` passes the run direc
 `validate/CLAUDE.md`).
 
 Consumers outside this package: `validate/harness.py` imports `Estimator` and
-`runner.{REGISTRY, run_baselines}`; `validate/scoreboard.py` imports
+`runner.{REGISTRY, run_baselines, state_total_bounds}`; `validate/scoreboard.py` imports
 `runner.{FALLBACK_RUNGS, PREFERRABLE, RUNG_OF}`; `cli.py` imports `runner.{REGISTRY,
 run_baselines, resolve_estimators, preferred_estimator, preferred_estimator_by_month,
-state_total_bounds}`. Nothing
-outside imports an estimator class directly.
+state_total_bounds}`. Since plan 16 `models/` imports the runner's bound and identifier helpers so
+the model is held to the baselines' rules rather than a copy of them: `models/reconciliation.py`
+takes `runner.{assert_bounds_cover, missing_cell_ids, month_bounds}`, `models/summary.py`
+`runner.state_total_bounds`, and `models/validation.py` `runner.{assert_within_bounds,
+release_integers, state_total_bounds}`. `missing_cell_ids` (formerly the private `_cell_ids`) and
+`release_integers` (§12.6's integer cut and its two checks, extracted verbatim from
+`run_baselines`) became public for that reason; `run_baselines`' output is unchanged, which
+`tests/integration/test_baseline_golden.py` pins. Nothing outside imports an estimator class
+directly.
 
 ## Adding an estimator
 

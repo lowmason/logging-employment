@@ -227,9 +227,13 @@ def test_the_shipped_config_resolves_to_the_parent_margin_comparand_run():
     MOVED ONCE, deliberately, by plan 15 Task 4: the fifth staged table (`qcew_state_parent`) and
     `D-114`'s rewrite of `cbp_state_size.parquet` re-id every run. The previous pin, `f03023ac9f3a`,
     is Stage 4's acceptance run; it stays on disk as the comparand plan 15 Task 9 measures against.
+
+    MOVED AGAIN by plan 16's config task: Appendix A's `model:` block joined `resolved_dict`. The
+    pin before it, `4cf47a918dd8`, is the §13.10 comparand. Plan 16 re-runs it under this id,
+    checks the two byte for byte, and keeps the old directory on disk.
     """
     cfg = load_config(REPO / "config.yaml")
-    assert run_id(cfg, _input_digests(cfg)) == "4cf47a918dd8"
+    assert run_id(cfg, _input_digests(cfg)) == "dd7337e89047"
 
 
 def test_no_scoring_regime_gained_or_lost_a_score(fixture_run):

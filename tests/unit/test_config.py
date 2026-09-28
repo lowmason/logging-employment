@@ -10,14 +10,14 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from logging_employment.config import Config, load_config, resolved_dict
+from logging_employment.config import Config, ModelConfig, load_config, resolved_dict
 from logging_employment.runs import run_id
 
 # NOT Appendix A's fence. Measured against `specs/logging-employment-spec.md`'s `## Appendix A`
 # block, this constant differs from it in four ways, every one of which is this package's doing
 # rather than the spec's:
-#   1. it OMITS `model:` -- Stage 5's block, for which `Config` has no field. Adding one would put
-#      a key in `resolved_dict` and re-identify every run directory under `runs/`.
+#   1. it OMITS `model:`, which `Config` defaults to `ModelConfig()` -- Appendix A's eleven values
+#      plus the three keys plan 16 originated.
 #   2. it OMITS `promotion:` and `validation:`, which `Config` defaults.
 #   3. it ADDS five `reconciliation:` keys this package originated (`tolerance`,
 #      `max_bisection_iterations`, `max_projection_iterations`, `zero_seed_floor`,
@@ -220,6 +220,21 @@ SPEC = REPO_ROOT / "specs" / "logging-employment-spec.md"
 # Appendix A's seven declared-inactive source entries, in the order the spec lists them.
 INACTIVE_SOURCES = ("tpo", "fia", "ces", "susb", "bds", "nonemployer", "bea")
 
+# Appendix A's `model:` keys, as the spec lists them. `ModelConfig` adds three more of its own.
+APPENDIX_A_MODEL_KEYS = (
+    "backend",
+    "chains",
+    "warmup",
+    "draws",
+    "target_accept",
+    "state_dynamic",
+    "include_change_points",
+    "include_harvest_factor",
+    "include_ces",
+    "standardized_beta_sd",
+    "suppressed_variance_multipliers",
+)
+
 
 def appendix_a_fence() -> dict[str, Any]:
     """Appendix A's example configuration, parsed out of the spec file itself.
@@ -243,44 +258,25 @@ def appendix_a_fence() -> dict[str, Any]:
     raise AssertionError("Appendix A carries no closed fenced block")
 
 
-def _appendix_a_made_loadable() -> dict[str, Any]:
-    """Appendix A's fence minus `model:`, the one block `Config` has no field for.
-
-    Popped HERE and not accepted in `config.py`, because a `model:` field would re-identify every
-    run directory for a stage that does not exist yet. Until `D-121` this also patched in
-    `baselines:` and the two `disclosure:` widths, which the spec did not state; Appendix A now
-    carries all three, the widths labelled as the governance owner's policy (§21).
-    """
-    fence = appendix_a_fence()
-    fence.pop("model")
-    return fence
-
-
-def _error_locations(payload: dict[str, Any]) -> list[tuple[str, str]]:
-    """Every `(dotted location, error type)` `Config` reports for `payload`, sorted."""
-    with pytest.raises(ValidationError) as caught:
-        Config.model_validate(payload)
-    return sorted((".".join(str(p) for p in e["loc"]), e["type"]) for e in caught.value.errors())
-
-
-def test_the_spec_fence_loads_but_for_stage_5s_model_block() -> None:
-    """Appendix A's own fence loads, except for the one block `Config` has no field for.
+def test_the_spec_fence_loads_whole() -> None:
+    """Appendix A's own fence loads with no patching, `model:` included.
 
     Before Appendix A's seven `enabled: false` sources were declared on `SourcesConfig`, this
     fence produced ELEVEN errors: those seven, `model`, and three `missing` keys -- `baselines:`
     and the two `disclosure:` widths. Code could fix only the seven; the three were a spec gap,
-    and defaulting them in `config.py` would have invented policy the spec did not state.
-    `D-121` (2026-09-26) closed that gap in the spec instead: Appendix A now carries all three,
-    the widths labelled as the governance owner's policy under §21. What is left is `model:`,
-    Stage 5's block. Adding a field for it would put a key in `resolved_dict` and re-identify
-    every run directory in `runs/`, so the first assertion pins that it is the ONLY error and the
-    second, after popping it, that the rest of the fence loads clean.
+    which `D-121` (2026-09-26) closed in the spec. `model:` was the last: plan 16 gave it
+    `ModelConfig`, accepting the one re-identification of every run directory that a field in
+    `resolved_dict` costs (its Decision 1). Until then this test pinned `model` as the fence's only
+    error, as `test_the_spec_fence_loads_but_for_stage_5s_model_block`.
+
+    The fence's block must be exactly Appendix A's eleven keys at `ModelConfig`'s defaults, so the
+    three keys plan 16 originated (`seed`, `priors`, `diagnostics`) stay recognisable as additions
+    rather than blending into the spec's own.
     """
     fence = appendix_a_fence()
-    assert _error_locations(fence) == [("model", "extra_forbidden")]
-
-    fence.pop("model")
-    Config.model_validate(fence)
+    cfg = Config.model_validate(fence)
+    assert sorted(fence["model"]) == sorted(APPENDIX_A_MODEL_KEYS)
+    assert cfg.model == ModelConfig()
 
 
 def test_the_spec_fence_declares_seven_inactive_sources_and_all_seven_load() -> None:
@@ -289,7 +285,7 @@ def test_the_spec_fence_declares_seven_inactive_sources_and_all_seven_load() -> 
     assert sorted(sources) == sorted(("qcew", "qcew_size", "cbp", *INACTIVE_SOURCES))
     assert all(sources[name] == {"enabled": False} for name in INACTIVE_SOURCES)
 
-    cfg = Config.model_validate(_appendix_a_made_loadable())
+    cfg = Config.model_validate(appendix_a_fence())
     assert all(getattr(cfg.sources, name).enabled is False for name in INACTIVE_SOURCES)
     assert cfg.sources.qcew.release_status == "final"
 
@@ -334,13 +330,14 @@ def test_an_inactive_source_reaches_neither_the_resolved_config_nor_the_run_id(
     assert run_id(with_seven, {}) == run_id(without, {})
 
 
-def test_the_shipped_configs_run_id_is_unmoved_by_the_inactive_source_fields() -> None:
+def test_the_shipped_configs_run_id_is_pinned() -> None:
     """A literal pin on the id `config.yaml` derives, because the cost of moving it is external.
 
-    `runs/f03023ac9f3a` is Stage 4's acceptance artifact and is derived from this config plus the
-    staged inputs. Those inputs are gitignored, so the digest map here is empty and the pinned
-    value is not that directory's name -- it is a canary over the same `resolved_dict` input,
-    which is the half of the id a config change can move. Measured before this change and
-    unchanged by it.
+    Run directories are derived from this config plus the staged inputs. Those inputs are
+    gitignored, so the digest map here is empty and the pinned value is no directory's name -- it
+    is a canary over the same `resolved_dict` input, which is the half of the id a config change
+    can move. MOVED ONCE, deliberately, by plan 16's config task: `model:` joined `resolved_dict`
+    (Decision 1). It read `39d1d0859838` from the inactive-source fields (R-S5P-6) until then, and
+    the seven inactive sources still move nothing.
     """
-    assert run_id(load_config(REPO_ROOT / "config.yaml"), {}) == "39d1d0859838"
+    assert run_id(load_config(REPO_ROOT / "config.yaml"), {}) == "14352bb8e56e"
