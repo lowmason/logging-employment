@@ -784,6 +784,82 @@ def _unfinished_reasons(unfinished: dict[str, list[str]]) -> str:
     )
 
 
+def _read_baseline_results(run: Path) -> tuple[pl.DataFrame, str]:
+    """`baseline_results.parquet`, read once, and refused unless `run-baselines` wrote it for this run.
+
+    `reconcile` checked that the file existed, parsed it from its path and took
+    `baseline_results_sha256` from a second read, so it verified whatever it found and recorded the
+    digest of whatever was there by then (`D-135`): results a `run-baselines` that failed between
+    its results and its manifest left (`D-133`), results rewritten since, or results produced before
+    `build-constraints` re-ran under the same id, which `run_id` does not see because it does not
+    cover code. `run-baselines` records the digest of the results it writes in
+    `baseline_manifest.json`'s `output_hashes` and stamps every row with the constraint set it ran
+    under, and both are checked here, the way `_read_comparand` checks `validate`'s tables and
+    `_solved_bounds` the bounds (#44 closed the same gap for `validate-state-model`).
+
+    ONE READ: the bytes hashed are the bytes parsed, so the recorded digest is of the rows that were
+    verified. A refusal is a precondition, as a missing file is, and writes no verdict: what is on
+    disk is not this run's baseline results, so there is nothing for §16.1's manifest to describe.
+    A manifest that cannot be read or names no digest is a refusal too, never an exception: no
+    `run-baselines` this run can see wrote the file.
+    """
+    import hashlib
+    import io
+    import json
+
+    import polars as pl
+
+    path = run / "baseline_results" / "baseline_results.parquet"
+    if not path.exists():
+        raise typer.BadParameter(
+            f"{path} is missing: no `run-baselines` run matches the harmonized inputs currently "
+            "in the staged directory. Run `run-baselines` first"
+        )
+    raw = path.read_bytes()
+    sha256 = hashlib.sha256(raw).hexdigest()
+    manifest = run / "baseline_manifest.json"
+    try:
+        recorded = json.loads(manifest.read_text())["output_hashes"]["baseline_results"]
+    except OSError, ValueError, KeyError, TypeError:
+        recorded = None
+    if recorded is None:
+        raise typer.BadParameter(
+            f"{manifest.name} is missing, cannot be read or records no digest for {path.name}, so "
+            "no `run-baselines` this run can see wrote it. Run `run-baselines` first"
+        )
+    if recorded != sha256:
+        raise typer.BadParameter(
+            f"{path.name} is not what {manifest.name} records `run-baselines` writing: it was "
+            "rewritten since, or left by a run that failed before its manifest. Run "
+            "`run-baselines` first"
+        )
+    try:
+        results = pl.read_parquet(io.BytesIO(raw))
+    except (pl.exceptions.PolarsError, pl.exceptions.PanicException) as error:
+        raise typer.BadParameter(
+            f"{path.name} cannot be parsed as Parquet, though {manifest.name} vouches for its "
+            "bytes. Run `run-baselines` first"
+        ) from error
+    schema = run / "schema_manifest.json"
+    try:
+        current = json.loads(schema.read_text())["constraint_set_hash"]
+    except OSError, ValueError, KeyError, TypeError:
+        current = None
+    if current is None:
+        raise typer.BadParameter(
+            f"this run's constraint set is unrecorded (its {schema.name} is absent, cannot be read, "
+            "or names none). Run `build-constraints`, `solve-bounds` and `run-baselines` first"
+        )
+    produced_against = sorted(set(results["constraint_set_hash"].to_list()))
+    if produced_against != [current]:
+        raise typer.BadParameter(
+            f"{path.name} was produced against constraint set {produced_against}, and this run's "
+            f"{schema.name} names {current!r}: `build-constraints` ran after `run-baselines`. Run "
+            "`solve-bounds` and `run-baselines` first"
+        )
+    return results, sha256
+
+
 @app.command("reconcile")
 def reconcile_command(
     config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
@@ -793,9 +869,12 @@ def reconcile_command(
     Stage 3 reconciles inside `run-baselines`, so this command verifies rather than produces: it
     re-sums the persisted estimates against each month's recorded residual and reports the largest
     difference. It does NOT re-run the allocation. Stage 5 makes it load-bearing, when posterior
-    draws reconcile separately from the estimators that seeded them.
+    draws reconcile separately from the estimators that seeded them. What it verifies must be this
+    run's: results its manifest does not vouch for, or from another constraint set, are refused
+    before anything is checked (`_read_baseline_results`, `D-135`).
     """
     import hashlib
+    import json
 
     import polars as pl
 
@@ -803,13 +882,7 @@ def reconcile_command(
 
     cfg = load_config(config)
     run = run_dir(cfg, run_id(cfg, _input_digests(cfg)))
-    path = run / "baseline_results" / "baseline_results.parquet"
-    if not path.exists():
-        raise typer.BadParameter(
-            f"{path} is missing: no `run-baselines` run matches the harmonized inputs currently "
-            "in the staged directory. Run `run-baselines` first"
-        )
-    results = pl.read_parquet(path)
+    results, results_sha256 = _read_baseline_results(run)
     ran = results.filter(pl.col("reconciliation_status") == "anchored_and_reconciled")
     drift = (
         ran.group_by(["estimator_id", "reference_month"])
@@ -820,13 +893,14 @@ def reconcile_command(
     within_tolerance = worst <= cfg.reconciliation.tolerance
     # §16.1: "Every command MUST write a machine-readable manifest and MUST be idempotent for the
     # same inputs." A verifier that only echoes leaves nothing for §18.1 to reproduce against, so
-    # the verdict and the digest of what was checked are persisted beside the results.
+    # the verdict and the digest of what was checked are persisted beside the results. The digest
+    # is of the bytes that were parsed, from the one read (`D-135`).
     payload: dict[str, object] = {
         "checked_pairs": drift.height,
         "max_residual_drift": worst,
         "tolerance": cfg.reconciliation.tolerance,
         "within_tolerance": within_tolerance,
-        "baseline_results_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "baseline_results_sha256": results_sha256,
     }
     # Plan 16: INV-012 re-measured on the PERSISTED draws once `fit-state-model` has written them.
     # `fit-state-model` checked the draws it held in memory; this reads the file back, so a defect
@@ -859,8 +933,16 @@ def reconcile_command(
 
         draws = read_store(store)
         check = check_reconciled(draws, tolerance=cfg.reconciliation.tolerance)
-        digest_matches = draws_digest(draws) == store_digest(store)
+        digest = draws_digest(draws)
+        digest_matches = digest == store_digest(store)
         state_model_passed = check.passed and digest_matches
+        # WHICH FIT the verdict describes (`D-137`). A re-fit deletes the store, the summary and
+        # its manifest, not this manifest, and `draws_sha256_matches` alone could not tell the
+        # last verdict's fit from the new draws beside it. The same three fields as the promotion
+        # record's `fit`, from one read of the report; `_stale_fit` read it before, on its own, so
+        # a report replaced between the two reads goes unnoticed, as `_validate_state_model` says
+        # of its own.
+        report = (run / "posterior" / "diagnostics.json").read_bytes()
         payload["state_model"] = {
             "draws_checked": check.draws_checked,
             "months_checked": check.months_checked,
@@ -868,6 +950,11 @@ def reconcile_command(
             "max_anchor_drift": check.max_anchor_drift,
             "bound_violations": check.bound_violations,
             "draws_sha256_matches": digest_matches,
+            "fit": {
+                "diagnostics_sha256": hashlib.sha256(report).hexdigest(),
+                "constraint_set_hash": json.loads(report)["constraint_set_hash"],
+                "draws_sha256": digest,
+            },
             "passed": state_model_passed,
         }
         typer.echo(

@@ -2777,7 +2777,7 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       `tests/unit/test_fetching.py`, `tests/integration/test_constraint_cli.py`); the helper's own
       tests are in `tests/unit/test_runs.py`, with one pinning that `cli._partial` names siblings the
       same way.
-- [ ] `D-135` **`reconcile` verifies whatever `baseline_results.parquet` it finds, and hashes it in a
+- [x] `D-135` **`reconcile` verifies whatever `baseline_results.parquet` it finds, and hashes it in a
       second read.** `cli.py::reconcile_command` checks only that the file exists. It compares neither
       its digest with `baseline_manifest.json`'s `output_hashes` nor its `constraint_set_hash` column
       with `schema_manifest.json`'s. So after `build-constraints` re-runs under the same id, or after a
@@ -2789,6 +2789,12 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       Size: quick-fix. Done when: `reconcile` reads the results once, hashing and parsing the same
       bytes, and refuses results that its manifest or the run's constraint set does not vouch for, with
       tests for a rewritten file and for a changed constraint set.
+      → done 2026-09-28 (/deferred quick fix): `cli.py::_read_baseline_results` reads the file once,
+      hashes and parses the same bytes, and refuses as a precondition, with no verdict written,
+      results whose digest `baseline_manifest.json` does not record or whose `constraint_set_hash`
+      column is not `schema_manifest.json`'s. Tests: a rewritten file, a `build-constraints` re-run
+      under the same id on a changed system, and a rewrite the moment the file is parsed, which the
+      recorded digest ignores (`tests/integration/test_baseline_cli.py`).
 - [x] `D-136` **A fit is tied to its bounds only by `constraint_set_hash`, so bounds re-solved under
       the same constraint set leave it looking current.** `run_id` does not cover code, so `solve-bounds`
       can re-run under the same id after a change to `constraints/bounds.py` and rewrite
@@ -2810,7 +2816,7 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       no digest and is refused as unrecorded, so `runs/dd7337e89047`'s production fit needs
       `fit-state-model` again before `reconcile` or `validate-state-model` reads it; its promotion
       record stands.
-- [ ] `D-137` **`reconcile_manifest.json`'s `state_model` verdict does not name the fit it checked, and
+- [x] `D-137` **`reconcile_manifest.json`'s `state_model` verdict does not name the fit it checked, and
       a re-fit leaves it standing.** `fit-state-model` deletes `posterior/`, `posterior_summary.parquet`
       and `state_model_manifest.json` but not `reconcile_manifest.json`, and `reconcile` records
       `draws_sha256_matches` but not the digest itself. After a re-fit, the last verdict stands beside
@@ -2820,6 +2826,11 @@ closed it. Each claim was re-read against the code at #44's head; the pins are s
       Size: quick-fix. Done when: `reconcile`'s `state_model` block names the fit the way the
       promotion record's `fit` does, and a test re-fits after `reconcile` and finds the verdict's fit
       differ from the new one.
+      → done 2026-09-28 (/deferred quick fix): `reconcile`'s `state_model` block carries `fit`, the
+      report's `diagnostics_sha256`, its `constraint_set_hash` and the draws' `draws_sha256`, as the
+      promotion record's does. The test re-fits under another seed after `reconcile` and finds the
+      verdict standing and naming the first fit's digests, not the new fit's
+      (`tests/integration/test_cli_state_model.py::test_the_verdict_names_the_fit_it_checked_and_stands_after_a_refit`).
 - [x] `D-138` **Nothing locks a run, so a second `validate-state-model` on it can corrupt the first's
       publish without an error.** `cli.py::_settle_state_model_validation` reads a publish's progress
       from its leftovers, and those look the same whether the publish was killed or is still running.

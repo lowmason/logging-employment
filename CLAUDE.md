@@ -61,7 +61,10 @@ commands that read a fit, `reconcile` and
 without a re-fit, and its draws would re-verify clean against their own bounds. The sets agreeing,
 they refuse one whose `deterministic_bounds_sha256` is not the digest of the file on disk, or that
 records none (`D-136`): `solve-bounds` re-run under the same set rewrites the file and keeps the
-hash. They also refuse,
+hash. `reconcile` first refuses baseline results that `baseline_manifest.json` does not vouch for
+or that carry another constraint set (`cli.py::_read_baseline_results`, `D-135`), and its
+`state_model` verdict names the fit it checked by the report's digest, its set and the draws'
+digest, as the promotion record's `fit` does (`D-137`). They also refuse,
 unread, a fit whose report records a pass while its store, `posterior_summary.parquet` or
 `state_model_manifest.json` is missing or cannot be read or parsed, or a digest the manifest records
 does not match (`cli.py::_unfinished_fit`): the report is written first, so an interrupted fit
@@ -238,9 +241,9 @@ in `runs/<run_id>/` beside one JSON manifest per command.
   estimator and re-running overwrites the same `runs/<id>/`. The one cross-stage check that does
   fire is `constraint_set_hash` (see `constraints/CLAUDE.md`). `solve-bounds` checks the constraint
   tables against it, `run-baselines` and `fit-state-model` check the bounds
-  (`cli.py::_solved_bounds`, the former since `D-130`), and `reconcile` and `validate-state-model`
-  check the fit, by constraint set (plan 16) and, the sets agreeing, by the bounds file's digest
-  (`D-136`).
+  (`cli.py::_solved_bounds`, the former since `D-130`), `reconcile` checks the baseline results
+  (`D-135`), and `reconcile` and `validate-state-model` check the fit, by constraint set (plan 16)
+  and, the sets agreeing, by the bounds file's digest (`D-136`).
 - **CBP responses are not byte-reproducible** — set-identical rows in a different order, so each
   re-fetch stores another object for the same year. `build.snapshot_paths` raises
   `AmbiguousSnapshotError` (`build.py::snapshot_paths`) rather than stacking two snapshots of one key; pass the

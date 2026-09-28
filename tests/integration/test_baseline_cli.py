@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -214,3 +215,74 @@ def test_run_baselines_refuses_bounds_solved_against_another_constraint_set(
     assert "solve-bounds" in result.output
     assert "build-constraints" in result.output
     assert (results.read_bytes(), manifest.read_bytes()) == before
+
+
+def test_reconcile_refuses_results_rewritten_since_run_baselines(staged_repo) -> None:
+    """`D-135`. `reconcile` checked only that `baseline_results.parquet` existed, so it verified
+    whatever was there: a file rewritten since, or one a `run-baselines` that failed before its
+    manifest left. `run-baselines` records the digest of the results it writes in
+    `baseline_manifest.json`, and results with another digest are refused as a precondition, with
+    no verdict written."""
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    path = run / "baseline_results" / "baseline_results.parquet"
+    recorded = hashlib.sha256(path.read_bytes()).hexdigest()
+    # The same rows, other bytes: polars' default compression against the deterministic writer's.
+    pl.read_parquet(path).write_parquet(path)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() != recorded
+    result = runner.invoke(app, ["reconcile", "--config", str(staged_repo.config_path)])
+    assert result.exit_code != 0
+    assert "run-baselines" in result.output
+    assert "baseline_results.parquet" in result.output
+    assert not (run / "reconcile_manifest.json").exists()
+
+
+def test_reconcile_refuses_results_from_another_constraint_set(
+    staged_repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-135`. After `build-constraints` re-runs under the same id, the persisted results were
+    produced against a constraint set the run no longer has, and `reconcile` verified them anyway.
+    Every row carries the set it was produced under, and a set that is not the manifest's is
+    refused, naming the command that ran out of order."""
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code == 0, result.output
+    _rebuild_on_a_changed_system(staged_repo.config_path, monkeypatch)
+    result = runner.invoke(app, ["reconcile", "--config", str(staged_repo.config_path)])
+    assert result.exit_code != 0
+    assert "run-baselines" in result.output
+    assert "build-constraints" in result.output
+    assert not (staged_repo.run_dir / "reconcile_manifest.json").exists()
+
+
+def test_reconcile_hashes_the_bytes_it_verifies(
+    staged_repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-135`. The verdict's `baseline_results_sha256` came from a second read of the path, after
+    the parse, so a rewrite between the two recorded a digest of rows the verdict never saw. The
+    file is rewritten the moment it has been parsed, as `run-baselines` re-run beside the command
+    would rewrite it, and the recorded digest is still of the bytes that were verified. The rewrite
+    hangs on `pl.read_parquet`, so the test also asserts it fired once: parsing by any other route
+    would never trigger it, and pass."""
+    result = runner.invoke(app, ["run-baselines", "--config", str(staged_repo.config_path)])
+    assert result.exit_code == 0, result.output
+    run = staged_repo.run_dir
+    path = run / "baseline_results" / "baseline_results.parquet"
+    verified = hashlib.sha256(path.read_bytes()).hexdigest()
+    read_parquet = pl.read_parquet
+    parsed: list[object] = []
+
+    def then_rewritten(source: object, *args: object, **kwargs: object) -> pl.DataFrame:
+        frame = read_parquet(source, *args, **kwargs)
+        parsed.append(source)
+        frame.write_parquet(path)
+        return frame
+
+    monkeypatch.setattr(pl, "read_parquet", then_rewritten)
+    result = runner.invoke(app, ["reconcile", "--config", str(staged_repo.config_path)])
+    monkeypatch.undo()
+    assert result.exit_code == 0, result.output
+    assert len(parsed) == 1
+    manifest = json.loads((run / "reconcile_manifest.json").read_text())
+    assert manifest["baseline_results_sha256"] == verified
+    assert hashlib.sha256(path.read_bytes()).hexdigest() != verified

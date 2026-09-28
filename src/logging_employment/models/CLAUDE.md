@@ -126,7 +126,9 @@ is identity, not content: the manifest's `draws_sha256` against the one the stor
 HDF5 will not open a store cut short, and both commands re-hash the draws themselves afterwards.
 `fit-state-model` keeps the last fit when it refuses stale bounds, and `build-constraints` can
 re-run without a re-fit, as `solve-bounds` can under one constraint set, so such a fit is a normal
-state of a run directory, not a corruption.
+state of a run directory, not a corruption. `reconcile`'s verdict names the fit it checked, the
+report's digest, its constraint set and the draws' digest, as the promotion record's `fit` does
+(`D-137`), so a re-fit leaves no verdict standing that cannot be told from the new draws.
 
 ## Tests and commands
 

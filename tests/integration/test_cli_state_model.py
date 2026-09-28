@@ -138,6 +138,49 @@ def test_reconcile_re_verifies_the_draws_on_disk(fitted) -> None:
 
 
 @pytest.mark.slow
+def test_the_verdict_names_the_fit_it_checked_and_stands_after_a_refit(
+    fitted, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`D-137`. `fit-state-model` deletes the store, the summary and its manifest before it samples,
+    but not `reconcile_manifest.json`, and the verdict recorded only that the digests matched. After
+    a re-fit the last verdict stood beside new draws with nothing to tell the two apart. It now
+    names the fit the way the promotion record's `fit` does: the report's digest, its constraint
+    set and the draws' digest. The re-fit runs under another seed, as a code change would run one
+    under the same run id, and the verdict still names the first fit."""
+    from dataclasses import replace
+
+    from logging_employment.models.interfaces import StateModelConfig
+
+    run = fitted.run_dir
+    for command in ("run-baselines", "reconcile"):
+        result = _invoke(command, fitted.config_path)
+        assert result.exit_code == 0, result.output
+    verdict = json.loads((run / "reconcile_manifest.json").read_text())["state_model"]
+    first = json.loads((run / "state_model_manifest.json").read_text())
+    schema = json.loads((run / "schema_manifest.json").read_text())
+    assert verdict["fit"] == {
+        "diagnostics_sha256": _sha256(run / "posterior" / "diagnostics.json"),
+        "constraint_set_hash": schema["constraint_set_hash"],
+        "draws_sha256": first["draws_sha256"],
+    }
+    from_config = StateModelConfig.from_config
+    monkeypatch.setattr(
+        StateModelConfig,
+        "from_config",
+        classmethod(lambda cls, model: replace(from_config(model), seed=model.seed + 1)),
+    )
+    result = _invoke("fit-state-model", fitted.config_path)
+    monkeypatch.undo()
+    assert result.exit_code == 0, result.output
+    second = json.loads((run / "state_model_manifest.json").read_text())
+    assert second["draws_sha256"] != first["draws_sha256"]
+    standing = json.loads((run / "reconcile_manifest.json").read_text())["state_model"]
+    assert standing == verdict
+    assert standing["fit"]["draws_sha256"] != second["draws_sha256"]
+    assert standing["fit"]["diagnostics_sha256"] != _sha256(run / "posterior" / "diagnostics.json")
+
+
+@pytest.mark.slow
 def test_a_failed_gate_exits_1_and_leaves_only_its_report(make_staged_repo) -> None:
     """Stale artifacts are planted first: a failed re-fit must not leave an old success behind."""
     repo = make_staged_repo({"model": {**SMALL_SAMPLER, **FAILING_GATE}})
