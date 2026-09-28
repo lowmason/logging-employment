@@ -1,4 +1,8 @@
-"""`cli._write_manifest`, the one writer every run manifest goes through."""
+"""`cli._write_manifest` and `cli._stage_manifest`: a run manifest is replaced whole.
+
+The state-model validation's publish, which stages its record through `_stage_manifest`, has its
+own module, `test_cli_publish.py`.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from logging_employment.cli import _write_manifest
+from logging_employment.cli import _stage_manifest, _write_manifest
 
 
 def test_a_write_that_fails_partway_leaves_the_last_manifest_whole(
@@ -51,3 +55,17 @@ def test_a_manifest_is_never_visible_until_it_is_whole(
         _write_manifest(path, {"generation": 1})
     monkeypatch.undo()
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_staged_manifest_holds_the_bytes_write_manifest_writes(tmp_path: Path) -> None:
+    """The promotion record is staged, not written, so that its rename can be a publish's commit
+    (Codex on #44). Its bytes must still be `_write_manifest`'s: one format, not two that drift."""
+    payload = {"verdict": "beat", "model_validation_hashes": {"validation_scores": "ab"}}
+    (tmp_path / "written").mkdir()
+    (tmp_path / "staged").mkdir()
+    _write_manifest(tmp_path / "written" / "promotion_record.json", payload)
+    staged = _stage_manifest(tmp_path / "staged" / "promotion_record.json", payload)
+    assert staged == tmp_path / "staged" / "promotion_record.json.partial"
+    written = tmp_path / "written" / "promotion_record.json"
+    assert staged.read_bytes() == written.read_bytes()
+    assert not (tmp_path / "staged" / "promotion_record.json").exists()

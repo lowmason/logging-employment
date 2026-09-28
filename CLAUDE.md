@@ -48,8 +48,10 @@ command list — four of §16.1's fifteen do not exist yet (`fit-size-model`, `d
 `publish`, `run-all`). `validate-state-model` is not one of the fifteen: plan 16 added it so that
 `validate` stays the §13.10 comparand's command, byte for byte. `fit-state-model` gates on
 `schema_manifest.json` and `deterministic_bounds.parquet`, and refuses bounds solved against another
-`constraint_set_hash`; `validate-state-model` on the three `validation_*` tables and
-`posterior/diagnostics.json`. The two commands that read a fit, `reconcile` and
+`constraint_set_hash`; `validate-state-model` on the three `validation_*` tables, the
+`validation_manifest.json` that records their digests, and `posterior/diagnostics.json`, and it
+refuses tables whose digests that manifest does not record (`cli.py::_read_comparand`). The two
+commands that read a fit, `reconcile` and
 `validate-state-model`, refuse one whose `diagnostics.json` names another `constraint_set_hash`
 (`cli.py::_stale_fit`): a fit outlives its constraint set whenever `build-constraints` re-runs
 without a re-fit, and its draws would re-verify clean against their own bounds. They also refuse,
@@ -58,7 +60,18 @@ unread, a fit whose report records a pass while its store, `posterior_summary.pa
 does not match (`cli.py::_unfinished_fit`): the report is written first, so an interrupted fit
 leaves a pass beside draws that were never written, and a file's existence does not prove it whole.
 Neither check raises on an artifact it cannot read, the report included: each refuses it, so
-`reconcile` still writes its verdict.
+`reconcile` still writes its verdict. `validate-state-model` writes every byte of the new
+validation, its tables and then its record, to `.partial` siblings before it moves anything, and
+the record's rename is the commit (`cli.py::_publish_state_model_validation`, Codex on #44). So a
+failure an hour into D1's 27 fits, or a record that cannot be written, keeps the last record and
+its tables, and the leftovers of a killed publish are settled when the command next starts
+(`cli.py::_settle_state_model_validation`), which refuses with `UnsettledPublishError` the one
+state no single publish leaves. The command holds an `flock` on
+`runs/<id>/validate_state_model.lock` for its whole run (`cli.py::_run_lock`, `D-138`), and a second
+invocation on the same run is refused with `RunInUseError` before it touches anything: its opening
+settle would otherwise undo a publish in flight, in one measured case committing a record beside
+tables it had lost, without an error. The kernel releases the lock on exit, killed or not, and the
+empty file stays.
 
 Markers are declared but never applied by `addopts`: `slow` is on one unit test and EIGHT
 integration modules (seventeen `mark.slow` sites since plan 16, which added the three model

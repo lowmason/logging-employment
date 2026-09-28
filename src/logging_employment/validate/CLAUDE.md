@@ -50,6 +50,15 @@ ValidationResult(scores, metrics, scoreboard, manifest)`. Two production callers
 `validation_manifest.json` into `runs/<id>/`. Since plan 16, `cli.py::validate_state_model_command`
 scores §11's model through `producer=StateModelProducer()` and writes the same three tables into
 `runs/<id>/state_model_validation/`, then §13.10's record to `runs/<id>/promotion_record.json`.
+The two are replaced together or not at all (Codex on #44): the tables go to
+`state_model_validation.partial/` and the record to `promotion_record.json.partial`, last, before
+anything moves, and then the last tables go to `state_model_validation.old/`, the staged ones in,
+and the staged record over the last, which is the commit (`cli.py::_publish_state_model_validation`).
+A failure or a kill before that rename leaves the last record and its tables, once
+`cli.py::_settle_state_model_validation` has run: on the exception, or at the command's next start.
+That holds for one publish at a time, so the command runs under an `flock` on
+`validate_state_model.lock` (`cli.py::_run_lock`) and refuses a second invocation on the same run
+(`RunInUseError`, `D-138`).
 
 - **The producer seam (plan 16).** A `harness.Producer` turns one masked frame and its
   `MaskedSystem` into `Production(results, interval_metrics, notes)`. `BaselineProducer` wraps
@@ -240,7 +249,15 @@ scores §11's model through `producer=StateModelProducer()` and writes the same 
 `promotion.evaluate_promotion` is the ONLY reader of `config.promotion`'s four keys, and
 `tests/unit/test_config_validation_block.py::test_the_promotion_keys_are_read_only_by_the_promotion_record`
 reddens on a second reader. It compares the model's `state_model_validation/` tables against the
-SAME run's `validate` tables, whose digests the record carries. The readings §13.10 leaves open are
+SAME run's `validate` tables, whose digests the record carries. `cli.py::_read_comparand` reads
+each of those tables once, hashing and parsing the same bytes, and the command refuses a comparand
+whose digests are not the `output_hashes` of `validate`'s own `validation_manifest.json`, or that
+cannot be read (#44), so the record never names a comparand no `validate` wrote. It names the fit
+too, in `fit`: the sha256 of the `posterior/diagnostics.json` bytes its gate was parsed from, that
+report's `constraint_set_hash`, and the digest of the draws it checked (`null` for a failed gate,
+which writes none). `fit-state-model` can re-run after the record, and nothing compares the two
+yet: the block makes the record answerable, and enforces nothing.
+The readings §13.10 leaves open are
 plan 16's Decision 4, and each is written into the record beside its evidence:
 
 - **Coverage is pooled** over every regime and seed, and per-regime values are reported but gate

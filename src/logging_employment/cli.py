@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import typer
 
 from .config import load_config
 
 if TYPE_CHECKING:  # annotations only; keeps CLI start-up cheap
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
+
+    import polars as pl
 
     from .config import Config
 
@@ -100,6 +103,42 @@ def _constraints_dir(cfg: Config) -> Path:
     return Path(cfg.storage.constraints_uri)
 
 
+def _partial(path: Path) -> Path:
+    """The sibling a file or directory is written to before it is renamed over `path`.
+
+    One name for every such sibling, so the manifest writer, the staged promotion record and the
+    staged validation tables agree on what an unfinished write looks like. No reader opens one.
+    """
+    return path.with_name(f"{path.name}.partial")
+
+
+def _stage_manifest(path: Path, payload: Mapping[str, object]) -> Path:
+    """Write the bytes `_write_manifest` puts at `path` to its `.partial` sibling, and return it.
+
+    The format lives here and only here. `_write_manifest` renames the sibling over `path` at
+    once. `_publish_state_model_validation` stages the promotion record this way and renames it
+    only once the tables it describes are in place, as its commit point (Codex on #44), and a
+    second `json.dumps` for that record would let the two formats drift apart.
+
+    The stamp is merged LAST so no caller can shadow or drop it, and the JSON keeps the
+    `indent=2, sort_keys=True` shape every one of these files already had -- `solve-bounds` reads
+    `schema_manifest.json` as a precondition gate and an integration test pins its bytes, so the
+    formatting is not free to drift. A write that fails removes its sibling.
+    """
+    import json
+
+    from .runs import code_provenance
+
+    text = json.dumps({**payload, **code_provenance()}, indent=2, sort_keys=True)
+    partial = _partial(path)
+    try:
+        partial.write_text(text)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    return partial
+
+
 def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
     """Write one run manifest, stamped with the code identity that produced it.
 
@@ -107,12 +146,8 @@ def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
     input data but deliberately not source (`runs.code_provenance`), so `code_commit` and
     `uv_lock_sha256` are the only things in `runs/<id>/` that can answer "was this directory
     written by the code I am reading?". A per-command `json.dumps` at each site made adding them
-    five edits, and made forgetting them on the sixth manifest the default outcome.
-
-    The stamp is merged LAST so no caller can shadow or drop it, and the JSON keeps the
-    `indent=2, sort_keys=True` shape every one of these files already had -- `solve-bounds` reads
-    `schema_manifest.json` as a precondition gate and an integration test pins its bytes, so the
-    formatting is not free to drift.
+    five edits, and made forgetting them on the sixth manifest the default outcome. The bytes are
+    `_stage_manifest`'s, which the promotion record shares.
 
     A MANIFEST IS REPLACED WHOLE (Codex on #42). `Path.write_text` truncates before it writes, so
     a full disk or a kill mid-write left an empty or partial manifest where readers look, and
@@ -122,15 +157,10 @@ def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
     directory. A write that fails removes its sibling. A process killed outright can leave one, and
     no reader opens it.
     """
-    import json
     import os
 
-    from .runs import code_provenance
-
-    text = json.dumps({**payload, **code_provenance()}, indent=2, sort_keys=True)
-    partial = path.with_name(f"{path.name}.partial")
+    partial = _stage_manifest(path, payload)
     try:
-        partial.write_text(text)
         os.replace(partial, path)
     except BaseException:
         partial.unlink(missing_ok=True)
@@ -562,6 +592,32 @@ def _stale_fit(run: Path) -> dict[str, str | None] | None:
     return {"fit_constraint_set_hash": fit, "constraint_set_hash": current}
 
 
+def _stale_reason(stale: Mapping[str, str | None]) -> str:
+    """`_stale_fit`'s finding as a clause and the command that clears it, claiming no more.
+
+    Two recorded sets that differ were reconciled apart. A missing one is something else: the
+    report or this run's `schema_manifest.json` is absent, cannot be read, or names no set. Both
+    commands said "reconciled against constraint set None" of it, which no fit ever was (#43's
+    follow-up). So it is "unrecorded", one word that Typer's box cannot wrap in two, and the remedy
+    starts at the command that writes the missing record.
+    """
+    fit, current = stale["fit_constraint_set_hash"], stale["constraint_set_hash"]
+    if current is None:
+        return (
+            "this run's constraint set is unrecorded (its schema_manifest.json is absent, cannot be "
+            "read, or names none). Run `build-constraints`, `solve-bounds` and `fit-state-model` first"
+        )
+    if fit is None:
+        return (
+            "the fit's constraint set is unrecorded (its report, posterior/diagnostics.json, is "
+            "absent, cannot be read, or names none). Run `fit-state-model` first"
+        )
+    return (
+        f"the fit was reconciled against constraint set {fit!r}, and this run's is {current!r}. "
+        "Run `solve-bounds` and `fit-state-model` first"
+    )
+
+
 def _unfinished_fit(run: Path) -> dict[str, list[str]] | None:
     """Why a passing fit's artifacts are not one finished fit, or `None` when they are.
 
@@ -637,7 +693,7 @@ def _unfinished_reasons(unfinished: dict[str, list[str]]) -> str:
 
     A mismatch is the manifest's word against an artifact's, and the artifact is the one named:
     `mismatched` says "its manifest", never the manifest's file, so every file a refusal names is
-    one to distrust.
+    one to distrust. `_read_comparand`'s findings share the shape and so the clause.
     """
     labels = {"mismatched": "not what its manifest records"}
     return "; ".join(
@@ -713,12 +769,7 @@ def reconcile_command(
     elif stale is not None:
         state_model_passed = False
         payload["state_model"] = {**stale, "passed": False}
-        typer.echo(
-            "state-total draws not checked: the fit was reconciled against constraint set "
-            f"{stale['fit_constraint_set_hash']!r}, and this run's is "
-            f"{stale['constraint_set_hash']!r}. Run `solve-bounds` and `fit-state-model` first",
-            err=True,
-        )
+        typer.echo(f"state-total draws not checked: {_stale_reason(stale)}", err=True)
     elif store.exists():
         from .models.arviz_io import draws_digest, read_store, store_digest
         from .models.reconciliation import check_reconciled
@@ -851,6 +902,273 @@ def validate_command(
         typer.echo(f"{regime} {entry['disposition']} scored={entry['n_scored']}")
 
 
+_COMPARAND_TABLES = ("validation_scores", "validation_metrics", "validation_scoreboard")
+
+
+class _Comparand(NamedTuple):
+    """This run's `validate` output as `_read_comparand` found it."""
+
+    frames: dict[str, pl.DataFrame]
+    sha256: dict[str, str]
+    found: dict[str, list[str]] | None
+
+
+def _read_comparand(run: Path) -> _Comparand:
+    """This run's `validate` output, each table read once, and why it is not what `validate` wrote.
+
+    §13.10 compares the model against this run's own comparand, and the record names it by
+    digest. The command took both on trust: it hashed whatever tables it found, parsed them again
+    from their paths after the harness, and never asked whether `validate` wrote them (#44, found
+    beside Codex's P1 on its publish). `validate` records the digest of each table it writes in
+    `validation_manifest.json`'s `output_hashes` (`validate_command`), so a table whose bytes are
+    not those is `mismatched`, the word `_unfinished_fit` uses for a fit artifact its manifest does
+    not vouch for, and no model is scored against a comparand that no `validate` wrote.
+
+    ONE READ PER TABLE. The bytes hashed are the bytes parsed, from memory, so a write between the
+    two -- `validate` re-run beside this command -- cannot make the record name one comparand while
+    the verdict is measured against another.
+
+    NO READ RAISES PAST THIS, the rule `_unfinished_fit` keeps (Codex on #43). A manifest that
+    cannot be read, does not parse to an object, or records no digest for a table, or anything but
+    a string for one, is `unreadable`: a `null` compared as a digest would blame the table, the one
+    file that is whole. So is a table that cannot be read or, its digest matching, does not parse
+    as Parquet, whether polars raises or panics. A panic is `PanicException`, which subclasses
+    `BaseException`, not `PolarsError`, and the #44 review measured 5 of 400 corrupted tables
+    raising it. `found` maps each kind to run-relative paths, as `_unfinished_fit`'s does, and is
+    `None` only when every table is what the manifest records, when `frames` holds all three.
+    """
+    import hashlib
+    import io
+    import json
+
+    import polars as pl
+
+    manifest = "validation_manifest.json"
+    try:
+        recorded = json.loads((run / manifest).read_text())["output_hashes"]
+        expected = {table: recorded[table] for table in _COMPARAND_TABLES}
+    except OSError, ValueError, KeyError, TypeError:
+        return _Comparand({}, {}, {"unreadable": [manifest]})
+    if not all(isinstance(digest, str) for digest in expected.values()):
+        return _Comparand({}, {}, {"unreadable": [manifest]})
+    frames: dict[str, pl.DataFrame] = {}
+    sha256: dict[str, str] = {}
+    found: dict[str, list[str]] = {}
+    for table in _COMPARAND_TABLES:
+        path = f"{table}.parquet"
+        try:
+            raw = (run / path).read_bytes()
+        except OSError:
+            found.setdefault("unreadable", []).append(path)
+            continue
+        sha256[table] = hashlib.sha256(raw).hexdigest()
+        if sha256[table] != expected[table]:
+            found.setdefault("mismatched", []).append(path)
+            continue
+        try:
+            frames[table] = pl.read_parquet(io.BytesIO(raw))
+        except pl.exceptions.PolarsError, pl.exceptions.PanicException:
+            found.setdefault("unreadable", []).append(path)
+    return _Comparand(frames, sha256, found or None)
+
+
+class _ValidationPaths(NamedTuple):
+    """Where a state-model validation and an unfinished publish of one live in a run directory.
+
+    Named once, because `_settle_state_model_validation` reads a publish's progress from exactly
+    these five, and a name spelled differently in the publisher would be a leftover it never sees.
+    """
+
+    record: Path
+    staged_record: Path
+    tables: Path
+    staged_tables: Path
+    old_tables: Path
+
+    @classmethod
+    def of(cls, run: Path) -> _ValidationPaths:
+        """The five paths in `run`."""
+        record = run / "promotion_record.json"
+        tables = run / "state_model_validation"
+        return cls(
+            record=record,
+            staged_record=_partial(record),
+            tables=tables,
+            staged_tables=_partial(tables),
+            old_tables=tables.with_name(f"{tables.name}.old"),
+        )
+
+
+def _settle_state_model_validation(run: Path) -> None:
+    """Finish or undo a publish of `run`'s state-model validation that did not run to its end.
+
+    ONE FUNCTION FOR AN EXCEPTION AND FOR A KILL, and it reads the disk, not the code path.
+    `validate-state-model` calls it first, under the run's lock, before it reads anything, and
+    `_publish_state_model_validation` calls it before it writes a byte and as its handler, for a
+    publish that raised. Which call raised proves nothing about what moved: an interrupt can land
+    after `os.replace` has renamed and before it returns. So the leftovers decide, and running
+    this twice does nothing the first run did not.
+
+    THE STAGED RECORD IS THE EVIDENCE. `promotion_record.json.partial` is the last byte a publish
+    writes and the first thing an undo removes, so while it exists the publish has not committed
+    and the last record is still `promotion_record.json`. The new tables are then wherever the
+    renames left them: staged until they were renamed in, `state_model_validation/` after. A staged
+    record with no staged directory therefore means they were moved in, and they are moved back
+    out -- which is the only way to undo a publish that had no last tables to move to `.old`, the
+    first one among them. The last tables come back from `.old`, then the staged record and the
+    staged directory are removed, in that order. With no staged record, a `.old` beside the
+    tables is the tail of a publish that committed, and is deleted, and a `.old` alone is the last
+    tables of a swap killed between its renames by the code before this protocol, and is moved
+    back. A staged directory with no staged record is a write that did not finish, or new tables
+    an undo moved out and was stopped before deleting, and either way it is deleted.
+
+    IT RAISES RATHER THAN GUESS. Nothing it removes is the last validation, so a failure here
+    leaves a state the next call settles. It never removes `.old` quietly: a publish beside one it
+    could not delete would fail its first rename, and its undo would stop on
+    `UnsettledPublishError` with staged leftovers, blaming two invocations at once for a directory
+    that could not be deleted, so the deletion's own error is raised before anything is staged.
+    And `os.replace` onto an existing empty directory succeeds without a word, so a `.old` beside
+    tables that are not new is refused (`UnsettledPublishError`) rather than renamed over them.
+
+    ONLY UNDER THE RUN'S LOCK (`_run_lock`, `D-138`). Leftovers look the same whether their
+    publish was killed or is still running, so every guarantee here holds only while no other
+    publish is running on the run. Beside one, a settle undoes its staging under it. Both
+    interleavings were measured in scratch against these functions, the first by #44's pre-push
+    review and the second after it. During the renames, the publish fails at its commit,
+    its handler's settle deletes the last tables as a committed tail, and the last record is left
+    beside the new tables with nothing for a later settle to find. During the staging, the settle
+    deletes the staging directory as an unfinished write, `build.write_parquet_deterministic`
+    recreates it for the next table, and the publish returns without an error, having committed a
+    record beside tables missing those written before. `validate_state_model_command` holds the
+    lock around every call it makes, its opening settle included.
+    """
+    import os
+    import shutil
+
+    from .errors import UnsettledPublishError
+
+    paths = _ValidationPaths.of(run)
+    if paths.staged_record.exists():
+        if paths.tables.exists() and not paths.staged_tables.exists():
+            os.replace(paths.tables, paths.staged_tables)
+        if paths.old_tables.exists():
+            if paths.tables.exists():
+                raise UnsettledPublishError(
+                    f"{paths.old_tables} holds the last state-model validation's tables beside "
+                    f"{paths.tables}, which no single publish leaves: settle the two by hand"
+                )
+            os.replace(paths.old_tables, paths.tables)
+        paths.staged_record.unlink()
+    elif paths.old_tables.exists():
+        if paths.tables.exists():
+            shutil.rmtree(paths.old_tables)
+        else:
+            os.replace(paths.old_tables, paths.tables)
+    if paths.staged_tables.exists():
+        shutil.rmtree(paths.staged_tables)
+
+
+def _publish_state_model_validation(
+    run: Path,
+    record: Mapping[str, object],
+    *,
+    tables: Mapping[str, pl.DataFrame],
+    validation_manifest: Mapping[str, object] | None,
+) -> None:
+    """Replace `promotion_record.json` and `state_model_validation/` together, or not at all.
+
+    BYTES FIRST, RENAMES LAST (Codex on #44). The last validation is its record and its tables,
+    and the order before this -- swap the tables in, delete the last ones, then write the record --
+    left the last record beside the new tables whenever the record's write failed, a full disk
+    above all. Now every byte is written before anything moves: the tables and their manifest to
+    `state_model_validation.partial/`, and the record, through `_stage_manifest`, to
+    `promotion_record.json.partial`, last. What follows is renames only: the last tables to
+    `.old`, the staged tables in, and the staged record over the last one. THAT RENAME IS THE
+    COMMIT: before it the last record stands, and `_settle_state_model_validation` puts its
+    tables back; after it the new record stands beside its own tables. `.old` is deleted only
+    then, and a failure deleting it costs nothing the next publish does not remove.
+
+    Any exception is raised as it was, once `_settle_state_model_validation` has left one whole
+    validation: the last, byte for byte, unless the record's rename ran, and the new one if it
+    did. If the settle fails too, its error is raised instead, with the original as its context,
+    and the next call settles what it left. A kill anywhere leaves leftovers that the next
+    `validate-state-model` settles before it reads anything. Until then, a kill between the first
+    rename and the commit leaves the last record beside new tables, or none, and nothing in this
+    package reads `state_model_validation/`. An interrupt after the commit exits non-zero with the
+    new validation published. Nothing is fsynced, so this is atomic against a process that dies,
+    not a machine that does. And all of this holds for one publish at a time: the command calls
+    this under the run's lock (`_run_lock`), because another invocation's settle would undo it in
+    flight (`_settle_state_model_validation`, `D-138`).
+
+    The record carries the digests of the tables it describes (`model_validation_hashes`). A
+    failed gate publishes no tables and no manifest: the last validation's tables are replaced by
+    none, never left beside a not-beaten record. The bytes are those the command always wrote:
+    nothing staged records its own path, and a rename keeps each file's sha256.
+    """
+    import os
+    import shutil
+
+    from .build import write_parquet_deterministic
+
+    paths = _ValidationPaths.of(run)
+    _settle_state_model_validation(run)
+    try:
+        paths.staged_tables.mkdir(parents=True)
+        hashes = {
+            table: write_parquet_deterministic(frame, paths.staged_tables / f"{table}.parquet")
+            for table, frame in tables.items()
+        }
+        if validation_manifest is not None:
+            _write_manifest(
+                paths.staged_tables / "validation_manifest.json",
+                {**validation_manifest, "output_hashes": hashes},
+            )
+            record = {**record, "model_validation_hashes": hashes}
+        staged_record = _stage_manifest(paths.record, record)
+        if paths.tables.exists():
+            os.replace(paths.tables, paths.old_tables)
+        os.replace(paths.staged_tables, paths.tables)
+        os.replace(staged_record, paths.record)
+    except BaseException:
+        _settle_state_model_validation(run)
+        raise
+    shutil.rmtree(paths.old_tables, ignore_errors=True)
+
+
+@contextmanager
+def _run_lock(run: Path) -> Iterator[None]:
+    """Hold `run`'s `validate-state-model` lock, or refuse with `RunInUseError` (`D-138`).
+
+    A settle cannot tell a killed publish's leftovers from a running one's, so two invocations on
+    one run must never overlap: the second one's opening settle would undo the first's publish
+    under it (`_settle_state_model_validation`). An `flock` rather than a lock file's existence,
+    because the kernel releases it when its holder exits, killed or not, so no crash leaves a run
+    locked and nothing has to guess whether a lock is stale. The file is kept, empty, after the
+    lock is released. Deleting it would let an invocation that opened the old file before the
+    deletion lock it once released, while another creates and locks a new file at the same path:
+    two holders at once. A run directory that does not exist holds nothing to settle or
+    publish, and the command refuses it at its first precondition, so it is not created to be
+    locked.
+    """
+    import fcntl
+
+    from .errors import RunInUseError
+
+    if not run.is_dir():
+        yield
+        return
+    lock = run / "validate_state_model.lock"
+    with lock.open("a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RunInUseError(
+                f"another validate-state-model is running on {run}, and holds {lock.name}: "
+                "a second one beside it could undo its publish. Wait for it to finish"
+            ) from error
+        yield
+
+
 @app.command("validate-state-model")
 def validate_state_model_command(
     config: Path = typer.Option(..., "--config", exists=True, dir_okay=False),
@@ -865,16 +1183,30 @@ def validate_state_model_command(
     manifest records (`_unfinished_fit`). A production fit that failed §11.14 is recorded as not
     beaten without running the harness. Otherwise the model is scored through
     `run_pseudo_suppression`'s own loop (`StateModelProducer`), which is 27 fits on D1. Its tables
-    go to `state_model_validation/` and the verdict to `promotion_record.json`. Both
-    verdicts exit 0, because "deploy the simpler method" is an outcome and not an error.
+    go to `state_model_validation/` and the verdict to `promotion_record.json`, both written in full
+    before either replaces the last, and the record's rename is the commit
+    (`_publish_state_model_validation`). Both verdicts exit 0, because "deploy the simpler method"
+    is an outcome and not an error. The whole of it runs under the run's lock (`_run_lock`), and a
+    second invocation on the same run is refused before it touches anything.
     """
+    from .errors import RunInUseError
+    from .runs import run_dir, run_id
+
+    cfg = load_config(config)
+    rid = run_id(cfg, _input_digests(cfg))
+    run = run_dir(cfg, rid)
+    try:
+        with _run_lock(run):
+            _validate_state_model(cfg, rid, run)
+    except RunInUseError as error:
+        raise typer.BadParameter(str(error)) from error
+
+
+def _validate_state_model(cfg: Config, rid: str, run: Path) -> None:
+    """`validate_state_model_command`'s body, under the run's lock: check, score and publish."""
     import hashlib
     import json
-    import shutil
 
-    import polars as pl
-
-    from .build import write_parquet_deterministic
     from .contracts import (
         VALIDATION_METRIC_SCHEMA,
         VALIDATION_SCORE_SCHEMA,
@@ -887,26 +1219,27 @@ def validate_state_model_command(
     from .models.interfaces import MODEL_ID, MODEL_VERSION, STORE_PATH
     from .models.reconciliation import check_reconciled
     from .models.validation import StateModelProducer
-    from .runs import run_dir, run_id
     from .validate.harness import run_pseudo_suppression
     from .validate.promotion import evaluate_promotion, production_failed_record
 
-    cfg = load_config(config)
-    rid = run_id(cfg, _input_digests(cfg))
-    run = run_dir(cfg, rid)
-    comparand = {
-        table: run / f"{table}.parquet"
-        for table in ("validation_scores", "validation_metrics", "validation_scoreboard")
-    }
+    # A publish killed last time left its leftovers, and until they are settled the last record
+    # can stand beside new tables. Settled here, before any refusal below, so the next run of this
+    # command closes that window even when it scores nothing. It restores or finishes; it never
+    # removes the last validation. Only under the run's lock: beside another invocation's publish
+    # it would undo that publish under it (`_run_lock`, `D-138`).
+    _settle_state_model_validation(run)
     diagnostics = run / "posterior" / "diagnostics.json"
     for path, command in [
-        *((p, "validate") for p in comparand.values()),
+        *((run / f"{table}.parquet", "validate") for table in _COMPARAND_TABLES),
+        (run / "validation_manifest.json", "validate"),
         (diagnostics, "fit-state-model"),
     ]:
         if not path.exists():
+            # The file is named run-relative, as a word of its own: Typer's box folds a word
+            # longer than its width, so an absolute path's file name can split across two lines.
             raise typer.BadParameter(
-                f"{path} is missing: §13.10 compares the model against this run's own comparand "
-                f"and reads its production gate. Run `{command}` first"
+                f"{path.relative_to(run)} is missing from {run}: §13.10 compares the model against "
+                f"this run's own comparand and reads its production gate. Run `{command}` first"
             )
     # Before the gate is read and before anything is deleted: a stale fit is neither scored nor
     # written up as not beaten, a passing fit whose artifacts are not one finished fit is not
@@ -914,47 +1247,65 @@ def validate_state_model_command(
     # deletion lost that record whenever the store had never been written (Codex on #41).
     stale = _stale_fit(run)
     if stale is not None:
-        raise typer.BadParameter(
-            f"{diagnostics} records constraint set {stale['fit_constraint_set_hash']!r}, but "
-            f"{run / 'schema_manifest.json'} names {stale['constraint_set_hash']!r}: the fit was "
-            "reconciled against another constraint set. Run `solve-bounds` and `fit-state-model` "
-            "first"
-        )
+        raise typer.BadParameter(f"the state-total model is not scored: {_stale_reason(stale)}")
     unfinished = _unfinished_fit(run)
     if unfinished is not None:
         raise typer.BadParameter(
             f"{diagnostics} records a passing fit, but its artifacts are not one finished fit "
             f"({_unfinished_reasons(unfinished)}). Run `fit-state-model` first"
         )
-    out = run / "state_model_validation"
-    shutil.rmtree(out, ignore_errors=True)
-    (run / "promotion_record.json").unlink(missing_ok=True)
-    out.mkdir(parents=True)
+    # The comparand is read once, here, and refused unless it is what `validate` recorded writing,
+    # so the record names by digest the tables the verdict is measured against (`_read_comparand`).
+    comparand = _read_comparand(run)
+    if comparand.found is not None:
+        raise typer.BadParameter(
+            f"this run's comparand is not what `validate` wrote "
+            f"({_unfinished_reasons(comparand.found)}). Run `validate` first"
+        )
+    # NOTHING OF THE LAST VALIDATION IS TOUCHED UNTIL THE NEW ONE IS WHOLE. Every read, the harness
+    # and the verdict come first, and only `_publish_state_model_validation` writes. The last record
+    # and its tables were deleted here, so anything that failed after this point, from a comparand
+    # that could not be read to an interrupt an hour into D1's 27 fits, cost them (#43's known gap,
+    # of Codex's #41 class). Now such a failure leaves both byte for byte and raises as it did.
     envelope = {
         "run_id": rid,
         "model_version": MODEL_VERSION,
         "comparand": {
             "run_id": rid,
-            **{
-                f"{table}_sha256": hashlib.sha256(path.read_bytes()).hexdigest()
-                for table, path in comparand.items()
-            },
+            **{f"{table}_sha256": comparand.sha256[table] for table in _COMPARAND_TABLES},
         },
     }
-    production_gate = json.loads(diagnostics.read_text())
+    # WHICH FIT the verdict describes (#44). `fit-state-model` can re-run on this run after the
+    # record is written, and nothing in the record said which fit it was. The gate and the digest
+    # the record carries come from one read of the report, so the gate is parsed from the bytes the
+    # fit is identified by. `_stale_fit` and `_unfinished_fit` read it before, each on its own, so a
+    # report replaced between their checks and this read goes unnoticed: the run's lock keeps out
+    # another `validate-state-model`, not a `fit-state-model`. A failed gate writes no draws, and
+    # the passing branch adds the digest of the draws it checked. Nothing in this package compares
+    # these with a later fit yet; they make the record answerable.
+    report = diagnostics.read_bytes()
+    production_gate = json.loads(report)
+    fit = {
+        "diagnostics_sha256": hashlib.sha256(report).hexdigest(),
+        "constraint_set_hash": production_gate["constraint_set_hash"],
+        "draws_sha256": None,
+    }
     if not production_gate["passed"]:
         record = production_failed_record(MODEL_ID, production_gate, cfg.promotion)
-        _write_manifest(run / "promotion_record.json", {**record, **envelope})
+        _publish_state_model_validation(
+            run, {**record, **envelope, "fit": fit}, tables={}, validation_manifest=None
+        )
         typer.echo("production fit failed §11.14: not_beaten, section_10_8_hierarchy selected")
         return
 
     store = run / STORE_PATH
     draws = read_store(store)
+    fit["draws_sha256"] = draws_digest(draws)
     check = check_reconciled(draws, tolerance=cfg.reconciliation.tolerance)
     store_check = {
         "max_anchor_drift": check.max_anchor_drift,
         "bound_violations": check.bound_violations,
-        "draws_sha256_matches": draws_digest(draws) == store_digest(store),
+        "draws_sha256_matches": fit["draws_sha256"] == store_digest(store),
     }
     store_check["passed"] = check.passed and bool(store_check["draws_sha256_matches"])
 
@@ -967,25 +1318,13 @@ def validate_state_model_command(
     ):
         validate_frame(frame, schema, table)
         assert_required_columns_present(frame, table)
-    hashes = {
-        table: write_parquet_deterministic(frame, out / f"{table}.parquet")
-        for table, frame in (
-            ("validation_scores", result.scores),
-            ("validation_metrics", result.metrics),
-            ("validation_scoreboard", result.scoreboard),
-        )
-    }
-    _write_manifest(
-        out / "validation_manifest.json",
-        {**result.manifest, "estimators": [MODEL_ID], "output_hashes": hashes},
-    )
     record = evaluate_promotion(
         model_id=MODEL_ID,
         model_scores=result.scores,
         model_metrics=result.metrics,
-        comparand_scores=pl.read_parquet(comparand["validation_scores"]),
-        comparand_metrics=pl.read_parquet(comparand["validation_metrics"]),
-        comparand_scoreboard=pl.read_parquet(comparand["validation_scoreboard"]),
+        comparand_scores=comparand.frames["validation_scores"],
+        comparand_metrics=comparand.frames["validation_metrics"],
+        comparand_scoreboard=comparand.frames["validation_scoreboard"],
         production_gate=production_gate,
         production_store_check=store_check,
         replicate_gates={
@@ -995,7 +1334,14 @@ def validate_state_model_command(
         },
         promotion=cfg.promotion,
     )
-    _write_manifest(
-        run / "promotion_record.json", {**record, **envelope, "model_validation_hashes": hashes}
+    _publish_state_model_validation(
+        run,
+        {**record, **envelope, "fit": fit},
+        tables={
+            "validation_scores": result.scores,
+            "validation_metrics": result.metrics,
+            "validation_scoreboard": result.scoreboard,
+        },
+        validation_manifest={**result.manifest, "estimators": [MODEL_ID]},
     )
     typer.echo(f"verdict {record['verdict']}; selected {record['selected_method']}")

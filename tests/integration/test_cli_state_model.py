@@ -18,7 +18,7 @@ import polars as pl
 import pytest
 from typer.testing import CliRunner
 
-from logging_employment.cli import _stale_fit, _unfinished_fit, app
+from logging_employment.cli import _stale_fit, _stale_reason, _unfinished_fit, app
 from logging_employment.models.arviz_io import draws_digest, read_store
 from logging_employment.models.interfaces import STORE_PATH
 from logging_employment.models.reconciliation import check_reconciled
@@ -207,6 +207,13 @@ def test_reconcile_fails_a_fit_from_another_constraint_set_without_reading_it(
     assert result.exit_code == 1
     assert isinstance(result.exception, SystemExit), result.exception
     assert "fit-state-model" in result.output
+    # A fit that names no constraint set was reconciled against none this run can see, and the
+    # message said "reconciled against constraint set None" (#43's follow-up).
+    if recorded is None:
+        assert "unrecorded" in result.output
+        assert "reconciled against" not in result.output
+    else:
+        assert recorded in result.output
     manifest = json.loads((run / "reconcile_manifest.json").read_text())
     current = json.loads((run / "schema_manifest.json").read_text())["constraint_set_hash"]
     assert manifest["within_tolerance"] is True
@@ -295,6 +302,26 @@ def test_reconcile_records_a_fit_whose_report_cannot_be_read(staged_repo, with_s
     )
     assert manifest["within_tolerance"] is True
     assert manifest["state_model"] == {**found, "passed": False}
+    if with_store:
+        assert "unrecorded" in result.output
+
+
+def test_a_stale_finding_never_names_a_constraint_set_nothing_recorded() -> None:
+    """Two recorded sets that differ were reconciled apart. A missing one is unrecorded, whether
+    the report or this run's `schema_manifest.json` is absent, unreadable or silent, and the
+    remedy starts at the command that writes the missing record."""
+    apart = _stale_reason({"fit_constraint_set_hash": "a1", "constraint_set_hash": "b2"})
+    assert "'a1'" in apart
+    assert "'b2'" in apart
+    assert "solve-bounds" in apart
+    fit = _stale_reason({"fit_constraint_set_hash": None, "constraint_set_hash": "b2"})
+    assert "unrecorded" in fit
+    assert "diagnostics.json" in fit
+    assert "reconciled against" not in fit
+    run = _stale_reason({"fit_constraint_set_hash": "a1", "constraint_set_hash": None})
+    assert "unrecorded" in run
+    assert "build-constraints" in run
+    assert "reconciled against" not in run
 
 
 def test_a_report_that_is_not_an_object_is_refused_by_both_checks(tmp_path) -> None:
