@@ -4,6 +4,27 @@
 > **subagent-driven-development** (the default) — or **executing-plans** when your human partner
 > chose inline execution at the handoff. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status: COMPLETE (2026-09-28)** — executed via subagent-driven-development; nothing deferred
+
+> Deviation (final review, `34a4f4f`): the whole-branch review (a code-reviewer and a Codex second
+> opinion) found that the inventory as written collected its keys in a `set`, so a second
+> `raise ValueError` added inside a function already in `KEEP` passed silently. `KEEP` now maps each
+> key to `(count, reason)`, `_bare_value_error_sites` became `_bare_value_error_counts` (a
+> `Counter`), and the test refuses unclassified, stale and miscounted keys; its docstring names what
+> the walk cannot see. The same commit corrected docstrings this plan wrote or kept:
+> `SecretInPayloadError` (it backs up `_without_credentials` only; `resolved_dict`'s output is
+> never scanned), `FallbackExhaustedError`, `preferred_estimator` and its new test (reachable only
+> through `run-baselines`, not from a §13 mask), `InfeasibleResidualError` (a summary true of all
+> ten raise sites, with `scale_into_bounds`, `allocate` and `release_integers` named), and
+> `errors.py`'s module docstring and root `CLAUDE.md`'s fail-closed bullet (`SecretInPayloadError`
+> carries no value). It reflowed `bridge_frame`'s docstring and the secrets bullet. The code blocks
+> below are what Tasks 1–6 landed (`79bcb6d`..`8ec3922`), not the final text.
+
+> Deviation (environment): executed in the primary checkout, which has `data/`, so the hermetic
+> tier's 45 data-bound skips ran and passed: base `1803 passed, 49 deselected` at `8e25074`, and
+> `1810 passed, 49 deselected` after Task 6. The +7 holds. The per-step counts below differ only
+> where a skip became a pass, and every list of failures matched the plan's.
+
 > No spec file: this plan is named for its theme, as `/deferred` prescribes for a Plan disposition,
 > and its requirements are one register item. The Plan Completion Protocol ticks that item.
 
@@ -172,7 +193,10 @@ Line numbers below are at `46ef072`.
   `PENDING: dict[str, str]`, both keyed `"<module path under src/logging_employment>::<qualified
   function>"`. Tasks 2–5 delete their lines from `PENDING`; Task 6 deletes `PENDING`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
+
+> Deviation (final review): this is the code `79bcb6d` landed; `34a4f4f` changed it (see the
+> note under Status).
 
 Create `tests/unit/test_fail_closed_inventory.py`:
 
@@ -279,7 +303,11 @@ def test_every_bare_value_error_is_a_callers_mistake_and_says_so() -> None:
     assert not stale, f"KEEP names sites that no longer raise a bare ValueError: {stale}"
 ```
 
-- [ ] **Step 2: Run it, and see what it refuses without `PENDING`**
+- [x] **Step 2: Run it, and see what it refuses without `PENDING`**
+
+> Deviation (mechanical): the red was observed with `PENDING: dict[str, str] = {}`, not with
+> `PENDING` absent, because the test body reads it: `1 failed`, naming the nine functions in the
+> order above and no other, then `1 passed` with `PENDING` as written.
 
 With `PENDING` in place this test passes at `46ef072`: the tree holds exactly the 14 KEEP
 functions and the 9 PENDING ones, 37 raise statements in all. Its red state is what `PENDING`
@@ -295,7 +323,10 @@ Observed with `PENDING` absent: `1 failed in 0.11s`, the assertion naming, in or
 plan converts, and no other.
 Observed with `PENDING` as written above: `1 passed in 0.10s`.
 
-- [ ] **Step 3: Add the three classes and widen two docstrings in `errors.py`**
+- [x] **Step 3: Add the three classes and widen two docstrings in `errors.py`**
+
+> Deviation (final review): `34a4f4f` rewrote parts of these docstrings (see the note under
+> Status).
 
 Replace `SchemaMismatchError` (`:57-58`):
 
@@ -369,7 +400,9 @@ class SecretInPayloadError(LoggingEmploymentError):
     """
 ```
 
-- [ ] **Step 4: State the rule in root `CLAUDE.md`**
+- [x] **Step 4: State the rule in root `CLAUDE.md`**
+
+> Deviation (final review): `34a4f4f` adds that `SecretInPayloadError` carries no value.
 
 Replace the bullet at `CLAUDE.md:177-179`:
 
@@ -395,7 +428,7 @@ with:
 
 `AGENTS.md` is a symlink to this file; it needs nothing.
 
-- [ ] **Step 5: Run the gates**
+- [x] **Step 5: Run the gates**
 
 Run: `uv run pytest tests/unit/test_fail_closed_inventory.py -q`
 Observed: `1 passed in 0.10s`
@@ -403,7 +436,7 @@ Observed: `1 passed in 0.10s`
 Run: `uv run ruff format src tests && uv run ruff check src tests && uv run interrogate src`
 Observed: format and check clean, `interrogate` at 100%.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/logging_employment/errors.py CLAUDE.md tests/unit/test_fail_closed_inventory.py
@@ -431,7 +464,7 @@ git commit -m "feat(errors): state the fail-closed rule and add the three classe
   `_check_dash_rows_carry_no_establishments` raises `ConceptViolationError`, `read_by_size_zip`
   raises `SchemaMismatchError`, messages unchanged.
 
-- [ ] **Step 1: Drain `PENDING` of this task's three sites**
+- [x] **Step 1: Drain `PENDING` of this task's three sites**
 
 Delete these three lines from `PENDING` in `tests/unit/test_fail_closed_inventory.py`:
 
@@ -441,7 +474,7 @@ Delete these three lines from `PENDING` in `tests/unit/test_fail_closed_inventor
     "ingest/qcew_size.py::read_by_size_zip": "Task 2",
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 In `tests/unit/test_qcew_routes.py`, add the import and a test after
 `test_boundary_probe_returns_the_earliest_year_that_answers`:
@@ -515,7 +548,12 @@ failed on `Regex pattern did not match`: a list's repr contains `[` and `]`, whi
 class to `re`, so `found []` matches nothing and `found ['a.csv', 'b.csv']` matches one character.
 Observed, then corrected.
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
+
+> Deviation (environment): `5 failed, 43 passed`, the plan's five failures. The skip the plan
+> saw is not the findings-document monitor: it is `test_qcew_routes.py:289`'s `pytest.skip` in
+> `test_the_member_selector_is_unique_in_the_real_archive_not_just_the_fixture`, which runs here
+> because its archive under `data/raw/audit/` exists.
 
 Run: `uv run pytest tests/unit/test_fail_closed_inventory.py tests/unit/test_qcew_routes.py tests/unit/test_qcew_parser.py tests/unit/test_qcew_size.py -q`
 Observed: `5 failed, 42 passed, 1 skipped in 0.60s` — the inventory test naming the three sites,
@@ -523,7 +561,7 @@ the probe test, the dash-row test, and both archive cases (each a `ValueError` w
 class was expected). The skip is `test_qcew_routes.py`'s findings-document monitor, which skips
 without `specs/findings/`' extract; it is not this task's.
 
-- [ ] **Step 4: Convert the three sites, and the table**
+- [x] **Step 4: Convert the three sites, and the table**
 
 `src/logging_employment/ingest/qcew.py`, the import (`:30`):
 
@@ -579,7 +617,9 @@ from ..errors import (
 
 The sentence at `ingest/CLAUDE.md:44`, "`probe_slice_boundary` would raise", stays true.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
+
+> Deviation (environment): `48 passed`, for the same reason.
 
 Run: `uv run pytest tests/unit/test_fail_closed_inventory.py tests/unit/test_qcew_routes.py tests/unit/test_qcew_parser.py tests/unit/test_qcew_size.py -q`
 Observed: `47 passed, 1 skipped in 0.52s`
@@ -587,7 +627,7 @@ Observed: `47 passed, 1 skipped in 0.52s`
 Run: `uv run ruff format src tests && uv run ruff check src tests && uv run interrogate src`
 Observed: clean, 100%.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/logging_employment/ingest tests/unit/test_qcew_routes.py tests/unit/test_qcew_parser.py tests/unit/test_qcew_size.py tests/unit/test_fail_closed_inventory.py
@@ -612,7 +652,7 @@ git commit -m "fix(ingest): the probe, the dash-row check and the by-size reader
 - Produces: `assert_113310_survives_the_window` raises `ClassificationContinuityError` on all four
   premises; `bridge_frame` raises `SchemaMismatchError`; messages unchanged.
 
-- [ ] **Step 1: Drain `PENDING` of this task's two sites**
+- [x] **Step 1: Drain `PENDING` of this task's two sites**
 
 Delete from `PENDING`:
 
@@ -621,7 +661,7 @@ Delete from `PENDING`:
     "harmonize/naics.py::assert_113310_survives_the_window": "Task 3",
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 `tests/unit/test_harmonize.py`, the import (`:13`):
 
@@ -685,13 +725,16 @@ from logging_employment.errors import (
     assert not out.exists()
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/unit/test_fail_closed_inventory.py tests/unit/test_harmonize.py tests/integration/test_build_harmonized.py -q`
 Observed: `7 failed, 38 passed in 1.38s` — the inventory test, the bridge test, the four
 crosswalk tests (three changed, one new) and the build-halts test.
 
-- [ ] **Step 4: Convert the two sites**
+- [x] **Step 4: Convert the two sites**
+
+> Deviation (final review): `34a4f4f` reflowed `bridge_frame`'s docstring; the words are the
+> ones shown.
 
 `src/logging_employment/harmonize/naics.py`, the import (`:23`):
 
@@ -760,7 +803,7 @@ from ..errors import SchemaMismatchError
             )
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/unit/test_fail_closed_inventory.py tests/unit/test_harmonize.py tests/integration/test_build_harmonized.py -q`
 Observed: `45 passed in 1.14s`
@@ -768,7 +811,7 @@ Observed: `45 passed in 1.14s`
 Run: `uv run ruff format src tests && uv run ruff check src tests && uv run interrogate src`
 Observed: clean, 100%.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/logging_employment/harmonize tests/unit/test_harmonize.py tests/integration/test_build_harmonized.py tests/unit/test_fail_closed_inventory.py
@@ -795,7 +838,7 @@ git commit -m "fix(harmonize): the crosswalk check and the bridge builder raise 
   `ConceptViolationError` for a single-month regime that would black out a state's history;
   messages unchanged.
 
-- [ ] **Step 1: Drain `PENDING` of this task's two sites**
+- [x] **Step 1: Drain `PENDING` of this task's two sites**
 
 Delete from `PENDING`:
 
@@ -804,7 +847,10 @@ Delete from `PENDING`:
     "validate/regimes.py::select_targets": "Task 4",
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
+
+> Deviation (final review): `34a4f4f` corrected the new test's docstring: the refusal is
+> reachable only through `run-baselines`, not from a §13 mask.
 
 `tests/unit/test_baselines_runner.py`, the import (`:20`) and a test after
 `test_the_preferred_estimator_follows_the_fallback_order`. `preferred_estimator` reads two
@@ -868,13 +914,18 @@ def test_a_single_month_regime_that_would_black_out_a_states_history_is_refused_
         select_targets("small_cell_biased", monthly, seed=1024, config=appendix_a_config)
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
+
+> Deviation (environment): `3 failed, 37 passed`, the plan's three failures: with `data/`
+> present the ten `requires_staged` tests run and pass.
 
 Run: `uv run pytest tests/unit/test_fail_closed_inventory.py tests/unit/test_baselines_runner.py tests/unit/test_validate_regimes.py -q`
 Observed: `3 failed, 27 passed, 10 skipped in 0.87s` — the inventory test and the two new tests.
 The 10 skips are `test_validate_regimes.py`'s `requires_staged` tests, absent `data/`.
 
-- [ ] **Step 4: Convert the two sites**
+- [x] **Step 4: Convert the two sites**
+
+> Deviation (final review): `34a4f4f` corrected `preferred_estimator`'s docstring the same way.
 
 `src/logging_employment/baselines/runner.py`, the import block (`:46-51`), the docstring
 (`:651-653`) and the raise (`:663`):
@@ -919,7 +970,9 @@ def preferred_estimator(results: pl.DataFrame) -> str:
                 )
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
+
+> Deviation (environment): `40 passed`, for the same reason.
 
 Run: `uv run pytest tests/unit/test_fail_closed_inventory.py tests/unit/test_baselines_runner.py tests/unit/test_validate_regimes.py -q`
 Observed: `30 passed, 10 skipped in 0.83s`
@@ -927,7 +980,7 @@ Observed: `30 passed, 10 skipped in 0.83s`
 Run: `uv run ruff format src tests && uv run ruff check src tests && uv run interrogate src`
 Observed: clean, 100%.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/logging_employment/baselines/runner.py src/logging_employment/validate/regimes.py tests/unit/test_baselines_runner.py tests/unit/test_validate_regimes.py tests/unit/test_fail_closed_inventory.py
@@ -952,7 +1005,7 @@ git commit -m "fix(baselines,validate): preferred_estimator and select_targets r
 - Produces: `Bounds(...)` raises `InfeasibleResidualError` for an inverted pair; `assert_no_secret`
   raises `SecretInPayloadError`; messages unchanged.
 
-- [ ] **Step 1: Drain `PENDING` of this task's two sites**
+- [x] **Step 1: Drain `PENDING` of this task's two sites**
 
 Delete from `PENDING`:
 
@@ -961,7 +1014,7 @@ Delete from `PENDING`:
     "store.py::assert_no_secret": "Task 5",
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 `tests/unit/test_scaling.py`, in `test_an_inverted_bound_pair_is_refused_when_the_bounds_are_built`
 (`:257-261`): extend the docstring's last sentence and change the class, keeping the pattern:
@@ -993,12 +1046,14 @@ def test_assert_no_secret_raises_on_a_leaked_value() -> None:
     assert "abc123" not in str(caught.value)
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/unit/test_fail_closed_inventory.py tests/unit/test_scaling.py tests/unit/test_store.py -q`
 Observed: `3 failed, 19 passed in 0.20s` — the inventory test and the two changed tests.
 
-- [ ] **Step 4: Convert the two sites, and the two docs that describe them**
+- [x] **Step 4: Convert the two sites, and the two docs that describe them**
+
+> Deviation (final review): `34a4f4f` reflowed the secrets bullet; the words are the ones shown.
 
 `src/logging_employment/reconcile/scaling.py`, `Bounds.__post_init__`'s docstring (`:48-49`)
 and raise (`:57`):
@@ -1060,7 +1115,7 @@ Root `CLAUDE.md`, the secrets bullet (`:180-181` at `46ef072`; six lines lower a
   the `key` param before recording, and `resolved_dict` keeps only the env var's *name*.
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 `tests/unit/test_fetching.py` is included because its CBP end-to-end test is the caller-side
 witness that a stripped key never reaches `assert_no_secret`:
@@ -1071,7 +1126,7 @@ Observed: `59 passed in 0.54s`
 Run: `uv run ruff format src tests && uv run ruff check src tests && uv run interrogate src`
 Observed: clean, 100%.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/logging_employment/reconcile/scaling.py src/logging_employment/store.py src/logging_employment/reconcile/CLAUDE.md CLAUDE.md tests/unit/test_scaling.py tests/unit/test_store.py tests/unit/test_fail_closed_inventory.py
@@ -1089,7 +1144,10 @@ git commit -m "fix(reconcile,store): Bounds and assert_no_secret raise named err
 - Consumes: the empty `PENDING` left by Tasks 2–5.
 - Produces: the inventory test in its final form, `KEEP` alone describing the tree.
 
-- [ ] **Step 1: Delete `PENDING`**
+- [x] **Step 1: Delete `PENDING`**
+
+> Deviation (final review): `34a4f4f` made the body count raises per key and added a third,
+> miscounted check (see the note under Status).
 
 `PENDING` is now `{}`. Delete the dict and the three comment lines above it, and simplify the
 test body to its Task 1 Step 2 form:
@@ -1100,12 +1158,15 @@ test body to its Task 1 Step 2 form:
     stale = sorted(set(KEEP) - found)
 ```
 
-- [ ] **Step 2: Run the inventory test**
+- [x] **Step 2: Run the inventory test**
 
 Run: `uv run pytest tests/unit/test_fail_closed_inventory.py -q`
 Observed: `1 passed in 0.09s`
 
-- [ ] **Step 3: Run the whole hermetic tier and the gates**
+- [x] **Step 3: Run the whole hermetic tier and the gates**
+
+> Deviation (environment): `1810 passed, 49 deselected in 149.44s`, against this checkout's
+> base of `1803 passed, 49 deselected` with `data/` present; the +7 is the check. `rg` summed to 25.
 
 Run: `uv run pytest -m "not slow and not network" -q`
 Observed, in the clone without `data/`: `1765 passed, 45 skipped, 49 deselected in 124.26s
@@ -1120,14 +1181,20 @@ Observed: clean, 100%.
 Run: `rg -c 'raise ValueError' src/ | awk -F: '{s+=$2} END{print s}'`
 Observed: `25` (37 at `46ef072`).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
+
+> Deviation (mechanical): committed as `1f9350f` with its trailer folded into the subject; the
+> controller amended the message alone, tree `565ddfa` unchanged, to `8ec3922`.
 
 ```bash
 git add tests/unit/test_fail_closed_inventory.py
 git commit -m "test: the fail-closed inventory holds only callers' mistakes (D-140)"
 ```
 
-- [ ] **Step 5: Plan Completion Protocol**
+- [x] **Step 5: Plan Completion Protocol**
+
+> Deviation (by assignment): run by the controller after the final review, as the writing-plans
+> Plan Completion Protocol, in the retire commit.
 
 Tick `D-140` in `specs/deferred_items.md` as `→ done in plan 17`, per the writing-plans skill's
 Plan Completion Protocol. `D-049` and `D-058` are named by the inventory's `KEEP` reasons and are
