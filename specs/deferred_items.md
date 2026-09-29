@@ -2952,3 +2952,26 @@ refusals it covers.
       module and function with a count and the reason it is a caller's mistake, and a raise added to
       or removed from a function is refused until it is classified. The counts came from the final
       review (`34a4f4f`): keys alone let a second raise in a listed function pass.
+
+## PR #48 follow-up — 2026-09-28
+
+Filed at the user's request after PR #48 merged: plan 17's final review found it outside
+`D-140`'s `ValueError` scope.
+
+- [ ] `D-141` **Three bare `KeyError` refusals sit outside the fail-closed inventory, which matches
+      only `raise ValueError`.** Root `CLAUDE.md`'s fail-closed rule (`D-140`) names any refusal
+      data can trigger, whatever builtin it would otherwise raise, but
+      `tests/unit/test_fail_closed_inventory.py` walks `src/` for `raise ValueError` alone, so a
+      data-triggered `raise KeyError` added anywhere passes it. Three exist (measured 2026-09-28 at
+      `681bb40`, `rg 'raise KeyError' src/`), and no run path reaches any of them yet:
+      `harmonize/dimensions.py::dimension_frame` refuses an unknown dimension name, a caller's
+      literal, and only `tests/unit/test_harmonize.py` calls it;
+      `validate/recover.py::is_exactly_recoverable` refuses a `cell_id` absent from the bounds; and
+      `validate/recover.py::mask_and_solve_size` refuses a drawn size class that does not match
+      exactly one national-size cell. The two in `recover.py` have test callers only until `D-085`
+      wires the harness's size arm, when a mask's data can reach both. Raised by plan 17's final
+      review (PR #48), outside `D-140`'s `ValueError` scope.
+      Size: quick-fix. Done when: the inventory test counts `raise KeyError` sites as it counts
+      `raise ValueError` ones, and each of the three is either named in `errors.py` or listed in
+      `KEEP` with the reason it is a caller's (plan 17's Decision 4 kept `classification.py`'s
+      unreached raises that way, to be re-decided when a run path reaches them).
