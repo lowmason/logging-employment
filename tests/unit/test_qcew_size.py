@@ -12,7 +12,11 @@ import pytest
 
 from logging_employment import constants
 from logging_employment.contracts import QCEW_NATIONAL_SIZE_SCHEMA, validate_frame
-from logging_employment.errors import MissingCrossTabulationError, UnknownSizeCodeError
+from logging_employment.errors import (
+    MissingCrossTabulationError,
+    SchemaMismatchError,
+    UnknownSizeCodeError,
+)
 from logging_employment.ingest import qcew_size
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "qcew_size" / "2017_q1_by_size.zip"
@@ -26,6 +30,18 @@ def _parsed() -> pl.DataFrame:
     return qcew_size.parse_qcew_national_size(
         _frame(), snapshot_id="s", reference_year=2017, naics_vintage="NAICS 2017"
     )
+
+
+@pytest.mark.parametrize("members", [[], ["a.csv", "b.csv"]], ids=["none", "two"])
+def test_an_archive_without_exactly_one_csv_fails_closed_by_name(members: list[str]) -> None:
+    """There is no file to read the columns of, so the schema cannot be matched:
+    `SchemaMismatchError`, naming the members found (`D-140`)."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for member in members:
+            archive.writestr(member, "x\n1\n")
+    with pytest.raises(SchemaMismatchError, match=re.escape(f"found {members}")):
+        qcew_size.read_by_size_zip(buffer.getvalue())
 
 
 def test_the_assertion_passes_on_the_real_file() -> None:

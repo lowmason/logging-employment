@@ -17,7 +17,11 @@ from logging_employment.contracts import (
     HarmonizedData,
     assert_declared_provenance,
 )
-from logging_employment.errors import ConceptViolationError, UniverseClosureError
+from logging_employment.errors import (
+    ConceptViolationError,
+    FallbackExhaustedError,
+    UniverseClosureError,
+)
 from logging_employment.reconcile.allocate import Weights
 
 
@@ -93,6 +97,21 @@ def test_the_preferred_estimator_follows_the_fallback_order(
 ) -> None:
     results, _ = run_baselines(harmonized_toy, appendix_a_config)
     assert preferred_estimator(results) in FALLBACK_ORDER
+
+
+def test_a_run_where_no_rung_produced_an_estimate_is_refused_by_name() -> None:
+    """Reachable from `run-baselines` on staged tables where every month's missing set is either
+    empty or declined by every rung, never from D1. A raise and not a sentinel, because
+    `preferred_estimator: null` in `baseline_manifest.json` would read as a considered choice:
+    `FallbackExhaustedError` (`D-140`)."""
+    declined = pl.DataFrame(
+        {
+            "estimator_id": ["cbp_intensity", "equal_allocation"],
+            "reconciliation_status": ["declined", "declined"],
+        }
+    )
+    with pytest.raises(FallbackExhaustedError, match="no estimator in §10.8's fallback hierarchy"):
+        preferred_estimator(declined)
 
 
 def test_the_integer_estimates_balance_to_the_allocations_own_total(

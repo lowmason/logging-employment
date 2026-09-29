@@ -46,6 +46,7 @@ from ..contracts import (
 from ..errors import (
     BoundViolationError,
     ConceptViolationError,
+    FallbackExhaustedError,
     InfeasibleResidualError,
     WeightDomainError,
 )
@@ -648,9 +649,11 @@ def _decline_rows(
 def preferred_estimator(results: pl.DataFrame) -> str:
     """§10.8's ordering, applied to whichever estimators actually produced estimates.
 
-    Raises when no rung ran. Unreachable on D1 -- §10.2's inputs are complete on every suppressed
-    cell, so rung 4 always produces estimates -- but reachable from a Stage 4 mask that empties
-    every month's missing set, which is why it raises rather than returning a sentinel.
+    Raises `FallbackExhaustedError` when no rung ran (`D-140`). Unreachable on D1 -- §10.2's
+    inputs are complete on every suppressed cell, so rung 4 always produces estimates -- but
+    reachable from `run-baselines`, its only caller, on staged tables where every month's missing
+    set is either empty or declined by every rung, which is why it raises rather than returning a
+    sentinel.
     """
     ran = set(
         results.filter(pl.col("reconciliation_status") == "anchored_and_reconciled")["estimator_id"]
@@ -660,7 +663,7 @@ def preferred_estimator(results: pl.DataFrame) -> str:
     for estimator_id in FALLBACK_ORDER:
         if estimator_id in ran:
             return estimator_id
-    raise ValueError("no estimator in §10.8's fallback hierarchy produced any estimate")
+    raise FallbackExhaustedError("no estimator in §10.8's fallback hierarchy produced any estimate")
 
 
 def preferred_estimator_by_month(results: pl.DataFrame) -> dict[str, str]:

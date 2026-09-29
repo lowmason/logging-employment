@@ -9,6 +9,7 @@ from tests.conftest import STAGED, requires_staged
 
 from logging_employment.config import load_config
 from logging_employment.contracts import HOLDOUT_REGIMES, HarmonizedData
+from logging_employment.errors import ConceptViolationError
 from logging_employment.validate.regimes import REGIME_SPECS, select_targets
 
 
@@ -70,6 +71,27 @@ def test_a_single_month_regime_leaves_lookback_history_unmasked():
         per_state[t.state_fips] = per_state.get(t.state_fips, 0) + 1
     # No state may lose more months than its lookback can absorb.
     assert max(per_state.values()) <= 96 - cfg.validation.minimum_unmasked_lookback_months
+
+
+def test_a_single_month_regime_that_would_black_out_a_states_history_is_refused_by_name(
+    make_monthly, appendix_a_config
+):
+    """Twelve observed months for one state and a draw of twenty (`replicates_per_regime`), so
+    every month is a target and the six-month `minimum_unmasked_lookback_months` cannot hold.
+    The line between a single-month regime and a blackout is a §13.3 concept, so the refusal is
+    `ConceptViolationError`, not a bare `ValueError` (`D-140`). Hermetic: no `data/`."""
+    monthly = make_monthly(
+        *(
+            {
+                "reference_month": f"2023-{month:02d}",
+                "employment_raw": str(100 + 7 * month),
+                "employment_value": 100 + 7 * month,
+            }
+            for month in range(1, 13)
+        )
+    )
+    with pytest.raises(ConceptViolationError, match="leaving fewer than 6 lookback months"):
+        select_targets("small_cell_biased", monthly, seed=1024, config=appendix_a_config)
 
 
 def test_the_census_divisions_partition_the_state_universe():

@@ -14,6 +14,7 @@ import polars as pl
 import pytest
 
 from logging_employment import constants
+from logging_employment.errors import SourceFetchError
 from logging_employment.ingest import qcew
 from logging_employment.ingest.base import HttpFetcher
 
@@ -42,6 +43,18 @@ def test_boundary_probe_returns_the_earliest_year_that_answers() -> None:
         return httpx.Response(200, content=FIXTURE.read_bytes())
 
     assert qcew.probe_slice_boundary(_fetcher(handler), "113310", range(2010, 2020)) == 2015
+
+
+def test_a_probe_no_candidate_year_answers_fails_closed_by_name() -> None:
+    """Every candidate 404s, so no boundary exists to route on. `SourceFetchError`, the class
+    `fetching.fetch_source` raises for an undeclared non-200 (R-S5P-4): the route answered
+    nothing `fetch` could record, and a bare `ValueError` read as a caller's mistake (`D-140`)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, content=b"")
+
+    with pytest.raises(SourceFetchError, match="served no candidate year for industry 113310"):
+        qcew.probe_slice_boundary(_fetcher(handler), "113310", range(2010, 2020))
 
 
 def test_boundary_probe_does_not_hard_code_a_year() -> None:
@@ -229,7 +242,7 @@ def test_every_window_year_still_routes_to_the_slice_endpoint() -> None:
     findings document at runtime, so a re-audit that moves the boundary past a window year turns
     this red instead of leaving a prose condition nobody re-reads. What production would then do is
     not take the bulk route -- probe_slice_boundary would face an all-404 candidate range and raise
-    ValueError -- which is why this is a monitor and not a coverage claim."""
+    `SourceFetchError` -- which is why this is a monitor and not a coverage claim."""
     findings, span = _qcew_routes_findings()
     earliest = int(findings["earliest_year_served"])
     window = range(int(span["window_start"][:4]), int(span["window_end"][:4]) + 1)

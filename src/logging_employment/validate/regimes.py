@@ -336,7 +336,7 @@ def select_targets(
         total_months = monthly["reference_month"].n_unique()
         for state, count in per_state.items():
             if total_months - count < floor:
-                raise ValueError(
+                raise ConceptViolationError(
                     f"{regime} would mask {count} of {total_months} months for state {state}, "
                     f"leaving fewer than {floor} lookback months. A single-month regime must not "
                     "black out a state's own history — that is what the blackout regimes are for."

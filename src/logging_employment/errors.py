@@ -1,7 +1,7 @@
 """Named fail-closed exceptions (§18.3).
 
 Each carries the offending value, so a caller's log line names what halted the run rather than
-only that something did.
+only that something did. `SecretInPayloadError` carries none: its value is the secret.
 """
 
 from __future__ import annotations
@@ -55,7 +55,15 @@ class SourceFetchError(LoggingEmploymentError):
 
 
 class SchemaMismatchError(LoggingEmploymentError):
-    """A fetched file's columns do not match the schema the parser declares."""
+    """A file's columns, or a row bound for a persisted table, do not match the declared schema.
+
+    The parsers raise it for a fetched file whose columns are not the ones they declare;
+    `ingest/qcew_size.py::read_by_size_zip` for a by-size archive that does not hold exactly one
+    CSV, so there is no file to read the columns of; and `harmonize/bridge.py::bridge_frame` for a
+    §8.6 bridge row missing a declared field, which Polars would otherwise persist as a null
+    `verification_status` or `uncertainty_treatment` -- the one thing §8.6 asks a bridge row to
+    say. Each carries the offending value: the columns, the members, or the fields (`D-140`).
+    """
 
 
 class MissingCrossTabulationError(LoggingEmploymentError):
@@ -117,11 +125,28 @@ class UniverseClosureError(LoggingEmploymentError):
 
 
 class InfeasibleResidualError(LoggingEmploymentError):
-    """§12.3's summed bounds exclude the residual, so no feasible scaling exists.
+    """No in-bounds allocation met the total: the bounds exclude one, or the allocator missed it.
+
+    `reconcile.scaling.scale_into_bounds` raises it for §12.3's summed check, where lower bounds sum
+    past the residual or upper bounds fall short of it. It raises it too when its search for lambda
+    ends short of the residual: a bracket that never reaches it, which a pragma marks unreachable in
+    practice, or a bisection that stops outside `tolerance` of it, where the iteration cap can cut
+    the search short and an allocation may exist that it did not find.
 
     `reconcile.integerize` raises it for §12.6's three integer refusals (`D-119`): a lower bound
     above its cap, lower bounds summing past the total, and caps summing short of it. Each leaves no
-    integer allocation inside the bounds that sums to the total (`D-139`).
+    integer allocation inside the bounds that sums to the total (`D-139`). `reconcile.scaling.Bounds`
+    raises it one layer earlier, as it is built from `deterministic_bounds`, for a cell whose lower
+    bound sits above its upper bound (`D-096`): the same "lower above its cap" shape, refused before
+    either clipping site can settle it in the cap's favour. `solve-bounds` refuses an infeasible
+    component before it writes a bound, so on a bounds file it wrote the shape is unreachable; it is
+    named all the same because the bounds are read off a file, and a file is the run's own state
+    (`D-140`).
+
+    `reconcile.allocate` raises it for a negative residual, since every allocation would then be
+    negative employment and §12.3's predicate refuses it, and `baselines.runner.release_integers`
+    raises it when `integerize`'s output does not sum to the required total: §12.6 step 5, kept as
+    defence in depth against a regression in `integerize`.
     """
 
 
@@ -236,4 +261,43 @@ class StoredObjectMismatchError(LoggingEmploymentError):
     existing object before trusting it; this is the refusal, naming the path, the digest found and
     the digest claimed. The remedy is to remove the object and fetch again. Nothing repairs it in
     place, because the store's promise is that a stored object is never rewritten.
+    """
+
+
+class ClassificationContinuityError(LoggingEmploymentError):
+    """113310 does not survive the D1 window's two NAICS vintages unchanged (§3.1, `D-102`).
+
+    `harmonize/naics.py::assert_113310_survives_the_window` raises it for any of its four premises:
+    a window vintage missing from the vendored crosswalk, a title other than Logging, a non-empty
+    structure-file change indicator, or a 2017 -> 2022 link that is not one-to-one. §3.1: "The ETL
+    MUST verify the 113310 mapping mechanically", and `build.build_harmonized` runs the check
+    before it writes a table, so a re-vendored crosswalk halts the build by name. Distinct from
+    `UnsupportedReferenceYearError`, which refuses a YEAR outside the vintages this package
+    handles; this refuses the CROSSWALK for the years it does.
+    """
+
+
+class FallbackExhaustedError(LoggingEmploymentError):
+    """No rung of §10.8's fallback hierarchy produced an estimate, so nothing can be preferred.
+
+    `baselines/runner.py::preferred_estimator` raises it. Unreachable on D1 -- §10.2's inputs are
+    complete on every suppressed cell, so rung 4 always produces estimates -- but reachable from
+    `run-baselines`, `preferred_estimator`'s only caller, on staged tables where every month's
+    missing set is either empty or declined by every rung, which is why it is a raise rather than
+    a sentinel: a `baseline_manifest.json` recording `preferred_estimator: null` would read as a
+    considered choice.
+    """
+
+
+class SecretInPayloadError(LoggingEmploymentError):
+    """A credential's value reached bytes bound for an artifact (§7.2, D3).
+
+    `store.assert_no_secret` raises it before a `source_snapshot` row is recorded, scanning the
+    payload for every non-empty value of `config.SECRET_ENV_VARS`. That payload is the row's
+    request URL and parameters, so this guard backs up only `fetching._without_credentials`, which
+    strips the `key` parameter before a response is recorded: a fetch branch that forgot to strip
+    the key is caught here. `config.resolved_dict` keeps only an env var's NAME, and its output is
+    not scanned: that guard holds only by never reading a value, so a secret-bearing `Config` field
+    would not be caught here. Alone among the classes here it carries no offending value, because
+    the value is the secret.
     """

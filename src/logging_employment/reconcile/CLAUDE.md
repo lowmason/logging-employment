@@ -137,7 +137,8 @@ The load-bearing points:
   All three refusals — a lower bound above its cap, lower bounds summing past the total, caps
   summing short of it — raise `InfeasibleResidualError` (`D-119`), never a bare `ValueError`, and
   they are exactly the infeasible cases: seats past the total hand units back from cells above
-  their lower bound, in the reverse of placement order (`D-139`).
+  their lower bound, in the reverse of placement order (`D-139`). `scaling.Bounds` refuses the
+  first shape one layer earlier, as it is built, under the same name (`D-096`, `D-140`).
 - **`reconcile_draws` never reduces the draw axis** (§12.7): negative dependence lives only in the
   joint object. A negative draw raises `WeightDomainError`; only a *zero* seed is floored — §12.4's
   floor covers zero, not sign.

@@ -13,7 +13,11 @@ import pytest
 from logging_employment import build
 from logging_employment.build import build_harmonized, write_parquet_deterministic
 from logging_employment.config import load_config
-from logging_employment.errors import ConceptViolationError, UnknownDisclosureRegimeError
+from logging_employment.errors import (
+    ClassificationContinuityError,
+    ConceptViolationError,
+    UnknownDisclosureRegimeError,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURES = REPO / "tests" / "fixtures"
@@ -280,7 +284,7 @@ def test_a_crosswalk_that_no_longer_pairs_113310_halts_the_build_before_writing(
     doctored.write_text(naics._CROSSWALK.read_text().replace(",1:1\n", ",1:2\n"))
     monkeypatch.setattr(naics, "_CROSSWALK", doctored)
     out = tmp_path / "doctored"
-    with pytest.raises(ValueError, match="one-to-one"):
+    with pytest.raises(ClassificationContinuityError, match="one-to-one"):
         build_harmonized(_cfg(), raw_root=frozen_raw, out_root=out)
     assert not out.exists()
 

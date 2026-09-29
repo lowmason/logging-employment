@@ -2915,7 +2915,7 @@ refusals it covers.
       check only by accident (`{"a": 5.7}` at `total=3`) and is now met by handing units back, as a
       `total` above it always was. Nothing compares the two; the one caller passes a total equal to
       `sum(values)`.
-- [ ] `D-140` **The fail-closed rule does not say which refusals it covers, and ten data-triggered
+- [x] `D-140` **The fail-closed rule does not say which refusals it covers, and ten data-triggered
       refusals still raise `ValueError`.** Root `CLAUDE.md`'s "Fail closed with a named error" bullet
       says every class in `errors.py` subclasses `LoggingEmploymentError` and carries the offending
       value, but not which refusals must raise one. `src/` holds 37 `raise ValueError` (measured
@@ -2941,3 +2941,14 @@ refusals it covers.
       Size: plan. Done when: root `CLAUDE.md`'s fail-closed bullet states which refusals take a named
       error and which keep `ValueError`, every site the rule assigns a named error raises one with its
       test updated, and `ingest/CLAUDE.md`'s fail-closed table matches.
+      → done in plan 17 (2026-09-28): `79bcb6d` states the rule in root `CLAUDE.md`'s fail-closed
+      bullet and adds `ClassificationContinuityError`, `FallbackExhaustedError` and
+      `SecretInPayloadError`. `232e8fc`, `7d50118`, `fde8bb5` and `a0a1c63` convert the seven
+      functions named above and two of the three DECIDE sites, `Bounds` and `assert_no_secret`;
+      `classification.py` keeps `ValueError` (plan 17, Decisions 3–5). Every message is unchanged,
+      and each test failed on the bare `ValueError` before its site converted. `ingest/CLAUDE.md`'s
+      table gives each site its own row. `tests/unit/test_fail_closed_inventory.py` holds the
+      re-count live: 25 bare `raise ValueError` remain under `src/` (37 before), each keyed by
+      module and function with a count and the reason it is a caller's mistake, and a raise added to
+      or removed from a function is refused until it is classified. The counts came from the final
+      review (`34a4f4f`): keys alone let a second raise in a listed function pass.

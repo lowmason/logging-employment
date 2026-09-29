@@ -257,8 +257,11 @@ def test_an_inverted_bound_pair_is_refused_when_the_bounds_are_built() -> None:
     the sums stay feasible. With a residual of 100 these sums are 90 and 201, and
     `scale_into_bounds` used to return 1.0 for '01', below the 90 its caller declared, where
     `integerize` refuses the same shape by name. Refused at construction, so neither clipping site
-    (`scale_into_bounds`, `clipped_sum`) can receive one."""
-    with pytest.raises(ValueError, match=r"'01' has lower bound 90\.0 above its upper bound 1\.0"):
+    (`scale_into_bounds`, `clipped_sum`) can receive one. The same name as `integerize`'s refusal
+    of the same shape, `InfeasibleResidualError` (`D-140`)."""
+    with pytest.raises(
+        InfeasibleResidualError, match=r"'01' has lower bound 90\.0 above its upper bound 1\.0"
+    ):
         Bounds(
             lower={"01": 90.0, "02": 0.0, "04": 0.0},
             upper={"01": 1.0, "02": 100.0, "04": 100.0},

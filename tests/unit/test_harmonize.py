@@ -10,7 +10,12 @@ import pytest
 
 from logging_employment.constants import STATES_DC_FIPS
 from logging_employment.contracts import BRIDGE_SCHEMA, validate_frame
-from logging_employment.errors import ConceptViolationError, UnsupportedReferenceYearError
+from logging_employment.errors import (
+    ClassificationContinuityError,
+    ConceptViolationError,
+    SchemaMismatchError,
+    UnsupportedReferenceYearError,
+)
 from logging_employment.harmonize import bridge, concepts, dimensions, disclosure, naics
 
 BRIDGE_ROW = {
@@ -79,7 +84,7 @@ def test_a_bridge_row_missing_a_field_fails_closed() -> None:
     # Polars would render the absent field as null. A bridge whose verification_status is silently
     # null asserts nothing about whether the mapping was estimated or declared (§8.6).
     incomplete = {k: v for k, v in BRIDGE_ROW.items() if k != "verification_status"}
-    with pytest.raises(ValueError, match="verification_status"):
+    with pytest.raises(SchemaMismatchError, match="verification_status"):
         bridge.bridge_frame([incomplete])
 
 
@@ -178,7 +183,7 @@ def test_a_split_or_merged_code_would_fail_the_window_assertion() -> None:
         .otherwise(pl.col("link_type_to_next"))
         .alias("link_type_to_next")
     )
-    with pytest.raises(ValueError, match="one-to-one"):
+    with pytest.raises(ClassificationContinuityError, match="one-to-one"):
         naics.assert_113310_survives_the_window(frame=doctored)
 
 
@@ -189,13 +194,21 @@ def test_a_retitled_code_would_fail_the_window_assertion() -> None:
         .otherwise(pl.col("title"))
         .alias("title")
     )
-    with pytest.raises(ValueError, match="title is not stable"):
+    with pytest.raises(ClassificationContinuityError, match="title is not stable"):
         naics.assert_113310_survives_the_window(frame=doctored)
 
 
 def test_a_flagged_change_indicator_would_fail_the_window_assertion() -> None:
     doctored = naics.crosswalk_113310().with_columns(pl.lit("R").alias("change_indicator"))
-    with pytest.raises(ValueError, match="change_indicator"):
+    with pytest.raises(ClassificationContinuityError, match="change_indicator"):
+        naics.assert_113310_survives_the_window(frame=doctored)
+
+
+def test_a_crosswalk_missing_a_window_vintage_would_fail_the_window_assertion() -> None:
+    """The fourth premise, which no test reached: a crosswalk vendored without one of the two
+    window vintages has nothing to pair, and names the vintages it found (`D-140`)."""
+    doctored = naics.crosswalk_113310().filter(pl.col("vintage") == "2017")
+    with pytest.raises(ClassificationContinuityError, match=r"found \['2017'\]"):
         naics.assert_113310_survives_the_window(frame=doctored)
 
 

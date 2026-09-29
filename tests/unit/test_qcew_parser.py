@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 
 from logging_employment.contracts import QCEW_MONTHLY_SCHEMA, validate_frame
-from logging_employment.errors import UnknownDisclosureCodeError
+from logging_employment.errors import ConceptViolationError, UnknownDisclosureCodeError
 from logging_employment.ingest import qcew
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "qcew" / "slice_2017q1.csv"
@@ -92,7 +92,9 @@ def test_a_true_zero_is_preserved_because_the_establishment_count_supports_it() 
 
 
 def test_a_dash_row_with_establishments_halts_rather_than_claiming_a_true_zero() -> None:
-    with pytest.raises(ValueError, match="qtrly_estabs"):
+    """The true-zero reading is a §2.2 concept ("Meaning of a QCEW zero"), and a '-' row carrying
+    establishments crosses it: `ConceptViolationError`, not a bare `ValueError` (`D-140`)."""
+    with pytest.raises(ConceptViolationError, match="qtrly_estabs"):
         qcew.parse_qcew_monthly(
             _row(
                 disclosure_code="-",
